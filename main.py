@@ -20,21 +20,20 @@ def onAppStart(app):
     app.books = []
     app.currentRead = None
     app.stepsPerSecond = 30
-#0.25 srconds compatrtp location 0.25 srconds ago if large eough shange page
-# #zooming and saving ppages amd ignor eswpies for 0.5 seconds
-#make sure works smoothly
-#start by debouncing to infinity
+
     app.gestureModel = GestureModel()
     app.gestureController = GestureController(app.gestureModel)
     app.usingCamera = False
+
     app.cursorX = 200
     app.cursorY = 200
     app.offset = 10
     app.curvedEdgeRadius = 10
     app.curvedEdgeOffset = 19
     app.burgerPressed = False
-    app.displayScreenOffsetY = 6
-    app.displayScreenOffsetX = 8
+    app.displayScreenOffsetYTurqoise = app.height * 0.825
+    app.displayScreenOffsetY = 15
+    app.displayScreenOffsetX = 15
     app.displayScreenTop = 90
     app.displayScreenLeft = 88
     app.displayScreenWidth = 490
@@ -90,8 +89,10 @@ def onStep(app):
             app.gestureModel.swipeDetected = False
     # If not using camera, onMouseMove handles app.cursorX/Y automatically
     
-
-
+def readingScreen(app):
+    #make pages or smth
+    drawRect(app.width//3, 0, app.width//3, app.height, fill = 'salmon')
+    
 
 #some ai for loadbook and makepages for loading pages
 def makeCurrentBook(app, book):
@@ -150,13 +151,14 @@ def onKeyPress(app, key):
             app.pageIndex -= 1
 
 def onMousePress(app, mouseX, mouseY):
-    print(f"bookClicked={getBookPressed(app, mouseX, mouseY)}")
     checkBurgerPressed(app, mouseX, mouseY)
     
     if app.libraryButton in getButtonPressed(app, mouseX, mouseY):
         app.defaultScreen = False
         app.readingScreen = False
         app.libraryScreen = True
+    
+
     
     if app.continueReading in getButtonPressed(app, mouseX, mouseY):
         if app.currentRead is not None:
@@ -169,12 +171,16 @@ def onMousePress(app, mouseX, mouseY):
         app.usingCamera = True
         app.gestureController.start()
     
-    currRead = getBookPressed(app, mouseX, mouseY)
-    if currRead is not None and app.libraryScreen:
-        app.readingScreen = True    # set FIRST
-        app.libraryScreen = False
-        app.defaultScreen = False
-        makeCurrentBook(app, currRead)  # called SECOND, after readingScreen is True
+    
+
+    
+    if app.libraryScreen:
+        currRead = getBookPressed(app, mouseX, mouseY)
+        if currRead is not None:
+            app.readingScreen = True    # set FIRST
+            app.libraryScreen = False
+            app.defaultScreen = False
+            makeCurrentBook(app, currRead)  # called SECOND, after readingScreen is True
 
 def getButtonPressed(app, mouseX, mouseY):
     intersected = []
@@ -184,6 +190,8 @@ def getButtonPressed(app, mouseX, mouseY):
     return intersected
 
 def getBookPressed(app, mouseX, mouseY):
+    if not app.libraryScreen:
+        return None
     for book in app.books:
         if book.intersect(mouseX, mouseY):
             return book
@@ -262,7 +270,7 @@ def onMouseMove(app, mouseX, mouseY):
     #BOUND MOUSE MOTIONif app.cursorY
     
 def loadBook(filename):
-    with open(f'Book_Text_Files/{filename}', 'r', encoding = 'utf-8') as f:
+    with open(f'{filename}', 'r', encoding = 'utf-8') as f:
         text = f.read()
     marker = '*** START OF'
     startIdx = text.find(marker)
@@ -293,27 +301,37 @@ def makePages(text, charsPerPage = 800):
     return pages
 
 def drawLibraryScreen(app):
-    Books.drawCovers(app)
 
-
-def drawDefaultScreen(app):
-    #make turqoise background
-    turqoise = rgb(186, 221, 212)
-    
-    drawRect(0 + app.offset, 10 , app.width - 20, app.height - 20, fill = turqoise)
-    drawCircle(app.width - app.curvedEdgeOffset, app.curvedEdgeOffset, app.curvedEdgeRadius, fill = turqoise)
-    drawCircle(app.curvedEdgeOffset, app.curvedEdgeOffset, app.curvedEdgeRadius, fill = turqoise)
-    drawCircle(app.curvedEdgeOffset, app.height - app.curvedEdgeOffset, app.curvedEdgeRadius, fill = turqoise)
-    drawCircle(app.width - app.curvedEdgeOffset, app.height - app.curvedEdgeOffset, app.curvedEdgeRadius, fill = turqoise)
-    #make gray
-    
     defaultScreenURL = 'defaultScreen.png'
     imageWidth, imageHeight = getImageSize(defaultScreenURL)
     drawImage(defaultScreenURL, app.width//2, app.height//2 + 15, align='center', width=imageWidth*1.5, height=imageHeight*1.5)
 
-    lightGray = rgb(226, 226, 226)
-    darkGray = rgb(133, 133, 133)
+    turqoise = rgb(188, 221, 212)
     
+    lightGray = rgb(226, 226, 226)
+    lightGrayBkg = curvedRect(app,app.width//2, app.height//2-20,
+                              app.width - 100 - 2*app.displayScreenOffsetX, 
+                              app.height - 100 - 2*app.displayScreenOffsetY, 
+                              lightGray)
+    lightGrayBkg.draw()
+    
+    darkerTurquoise = rgb(128, 182, 166)
+    
+    darkerTurquoiseBkg = curvedRect(app,app.width//2, 500, 800, 350, darkerTurquoise)
+    darkerTurquoiseBkg.draw()
+    darkBlue = rgb(128, 153, 183)
+    darkBlueBkg = curvedRect(app,app.width//2, 742, app.width-200, 80, darkBlue)
+    darkBlueBkg.draw()
+    #DRAW CIRCLES
+    Books.drawCovers(app)
+
+
+def drawDefaultScreen(app):
+    defaultScreenURL = 'defaultScreen.png'
+    imageWidth, imageHeight = getImageSize(defaultScreenURL)
+    drawImage(defaultScreenURL, app.width//2, app.height//2 + 15, align='center', width=imageWidth*1.5, height=imageHeight*1.5)
+    
+
 def drawBurgerMenu(app):
     drawRect(app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX - app.menuWidth,
              app.displayScreenTop + app.displayScreenOffsetY + app.burgerAndMenuOffset, app.menuWidth, app.menuHeight, fill='black')
@@ -382,10 +400,10 @@ class Books:
     def drawCovers(app):
         for book in app.books:
             imageWidth, imageHeight = getImageSize(book.coverImage)
-            drawImage('bookIcon.png', book.left + 5, book.top + 5, align = 'center',
-                    width=imageWidth//1.7, height=imageHeight//1.7)
-            drawImage(book.coverImage, book.left, book.top, align='center',
-                    width=imageWidth//2, height=imageHeight//2)
+            drawImage('bookIcon.png', book.left, book.top, align = 'center',
+                    width=imageWidth//1.5, height=imageHeight//1.5)
+            drawImage(book.coverImage, book.left + 7, book.top - 5, align='center',
+                    width=imageWidth//3.5, height=imageHeight//3.5)
     
     def intersect(self, x, y):
         imageWidth, imageHeight = getImageSize(self.coverImage)
@@ -402,9 +420,7 @@ class Books:
     
     def __eq__(self, other):
         return isinstance(other, Books) and ((self.title, self.author) == (other.title, other.author))
-
-##########################################################################
-#almost fully integrated gestures with AI below but with some self integrated codeclass GestureModel:
+#almost fully integrated gestures classes with AI below but with some self integrated editing:
 class GestureModel:
     def __init__(self):
         # Thread safety
@@ -516,6 +532,31 @@ class GestureController:
                     time.sleep(0.01)
         finally:
             camera.release()
+
+
+class curvedRect:
+    def __init__(self, app,cX,cY, width, height, color):
+        self.cX = cX
+        self.cY = cY
+        self.w = width 
+        self.h = height 
+        self.color=color
+    def getLeftTopWidthHeight(self):
+        return self.cX, self.cY, self.w, self.h
+    def getCircleCoords(self):
+        return [(self.cX + 7, self.cY + 8),
+                (self.cX +7, self.cY + self.h - 8),
+                (self.cX + self.w - 7, self.h + self.cY - 8),
+                (self.cX + self.w - 7, self.cY + 8)]
+    def draw(self):
+        drawRect(self.cX,self.cY,self.w,self.h,fill=self.color,align = 'center')
+        
+    def drawCircleCoord(self):
+        for cx, cy in self.getCircleCoords():
+            drawCircle(cx, cy, 10, fill=self.color)
+
+    
+
 def main():
     runApp()
 
