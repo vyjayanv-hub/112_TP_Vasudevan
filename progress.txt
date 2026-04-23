@@ -1,0 +1,15 @@
+The Importance Of Being Earnest|0|
+Little Women|0|
+The Great Gatsby|0|
+The Scarlet Letter|24|
+The Tale of Two Cities|0|
+Frankenstein|0|
+The Phantom of the Opera|0|
+Great Expectations|7|2,3
+Autobiography of Benjamin Franklin|29|
+The Brothers Karamazov|0|
+The Count of Monte Cristo|53|
+Moby Dick; Or, The Whale|0|
+Romeo and Juliet|11|
+Pride and Prejudice|4|
+Dracula|0|

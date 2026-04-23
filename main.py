@@ -4,6 +4,7 @@ import mediapipe as mp
 import threading
 import time
 from collections import deque
+
 # Put this near the top of main.py
 global_latest_hand_result = None
 
@@ -21,9 +22,31 @@ def onAppStart(app):
     app.currentRead = None
     app.stepsPerSecond = 30
 
+
+
+    app.bookSpaceY = 150
+    app.numshelves = 3
+    app.numBooksPerShelf = 5
+    app.bookSpaceX = 125
+
     app.gestureModel = GestureModel()
     app.gestureController = GestureController(app.gestureModel)
     app.usingCamera = False
+
+    app.fontSize = 14
+
+    app.notes = {}
+    app.highlights = {}
+    app.activeHighlight = False #checks if highlight mode is on
+    app.activeNote = False
+    app.noteText = ''
+    app.activeBookmark = False
+    app.showNotesPanel = False
+    app.notesScroll = 0
+
+    app.showChapterPanel = False
+    app.chapterScroll = 0
+    app.chapters = []
 
     app.cursorX = 200
     app.cursorY = 200
@@ -43,11 +66,31 @@ def onAppStart(app):
     app.menuWidth = 100
     app.burgerAndMenuOffset = 22
     app.menuHeight = 180
+
+    app.bookBoxLeft = app.displayScreenLeft
+    app.bookBoxTop = app.displayScreenTop + 25
+    app.bookBoxWidth = app.displayScreenWidth
+    app.bookBoxHeight = app.height - 160
+    app.margin = 30
+
     makeButtons(app)
     makeBooks(app)
     app.gestureModel = GestureModel()
     app.gestureController = GestureController(app.gestureModel)
+    loadAllProgress(app)
 
+
+
+# Standalone functions (outside any class) - you already have these, keep them
+def saveAllProgress(app):
+    with open('progress.txt', 'w') as f:
+        for book in app.books:
+            bms = ','.join(str(p) for p in book.bookmarks)
+            f.write(f'{book.title}|{book.currPage}|{bms}\n')
+
+def loadAllProgress(app):
+    for book in app.books:
+        book.loadProgress()
 
 ###################################################
 #AI for using gesture model
@@ -80,8 +123,10 @@ def onStep(app):
             # Page flipping logic
             if swipeDir == "LEFT" and app.pageIndex < app.totalPages - 1:
                 app.pageIndex += 1
+                savePageChangeOnKeyPress(app)
             elif swipeDir == "RIGHT" and app.pageIndex > 0:
                 app.pageIndex -= 1
+                savePageChangeOnKeyPress(app)
         
         # 3. If a swipe happened on a non-reading screen, reset it so it 
         # doesn't 'carry over' when the user eventually opens a book.
@@ -98,89 +143,230 @@ def readingScreen(app):
 def makeCurrentBook(app, book):
     
     if app.readingScreen:
+        app.bookBoxLeft = app.displayScreenLeft
+        app.bookBoxTop = app.displayScreenTop + 25
+        app.bookBoxWidth = app.displayScreenWidth
+        app.bookBoxHeight = app.height - 160
         app.currentRead = book
-        app.margin = 30
-        app.lineHeight = 18
-        app.fontSize = 14
+        app.lineHeight = int(app.fontSize * 1.35)
         app.fileName =  book.getURL()
         rawText = loadBook(app.fileName)
-        charsPerLine = (app.width - 2 * app.margin) // (app.fontSize * 0.6)
-        linesPerPage = (app.height - 120) // app.lineHeight
+        print(f'loaded: {app.fileName}, length: {len(rawText)}')  # add this
+
+        charsPerLine = int((app.width - 2 * app.margin) // (app.fontSize * 0.55))
+        linesPerPage = int((app.height - 120) // app.lineHeight)
         app.charsPerPage = int(charsPerLine * linesPerPage)
+
         app.pages = makePages(rawText, app.charsPerPage)
-        app.pageIndex = 0
         app.totalPages = len(app.pages)
+        book.totalPages = app.totalPages
+
+        app.pageIndex = book.currPage
+
+        #when you reopen book pages are reclaulcated and may have elss or more pages,
+        #so saved index may be out of range
+        app.pageIndex = min(app.pageIndex, app.totalPages - 1)
+        app.pageIndex = max(app.pageIndex, 0)
+
+        app.chapters = extractChapters(app.pages)
+        app.showChapterPanel = False
+        app.chapterScroll = 0
 
 
 def makeBooks(app):
-    app.earnestWilde = Books(100, 400, 'The Importance Of Being Earnest', 'Oscar Wilde', 254, 'pg844.cover.medium.jpg', 'pg844.txt')
-    app.books.append(app.earnestWilde)
-    app.littleWomenAlcott = Books(225, 400, 'Little Women', 'Louisa May Alcott', 499, 'pg26297.cover.medium.jpg', 'pg514.txt')
-    app.books.append(app.littleWomenAlcott)
-    app.gatsbyFitzgerald = Books(350, 400, 'The Great Gatsby', 'Scott Fitzgerald', 180, 'pg64317.cover.medium.jpg', 'pg64317.txt')
-    app.books.append(app.gatsbyFitzgerald)
-    app.scarletHawthorne = Books(100, 550, 'The Scarlet Letter', 'Nathaniel Hawthorne', 272,'pg25344.cover.medium.jpg', 'pg25344.txt')
-    app.books.append(app.scarletHawthorne)
+    bookData = [
+        ('The Importance Of Being Earnest', 'Oscar Wilde', 'pg844.cover.medium.jpg', 'pg844.txt'),
+        ('Little Women', 'Louisa May Alcott', 'pg26297.cover.medium.jpg', 'pg514.txt'),
+        ('The Great Gatsby', 'Scott Fitzgerald','pg64317.cover.medium.jpg', 'pg64317.txt'),
+        ('The Scarlet Letter', 'Nathaniel Hawthorne', 'pg25344.cover.medium.jpg', 'pg25344.txt'),
+        ('The Tale of Two Cities', 'Charles Dickens', 'pg98.cover.medium.jpg', 'pg98.txt'),
+        ('Frankenstein', 'Mary Shelly', 'pg84.cover.medium.jpg', 'pg84.txt'),
+        ('The Phantom of the Opera', 'Gaston Leroux', 'pg175.cover.medium.jpg', 'pg175.txt'),
+        ('Great Expectations', 'Charles Dickens', 'pg1400.cover.medium.jpg', 'pg1400.txt'),
+        ('Autobiography of Benjamin Franklin', 'Benjamin Franklin', 'pg20203.cover.medium.jpg', 'pg20203.txt'),
+        ('The Brothers Karamazov', 'Fyodor Dostoyevsky', 'pg28054.cover.medium.jpg', 'pg28054.txt'),
+        ('The Count of Monte Cristo', 'Alexandre Dumas', 'pg1184.cover.medium.jpg', 'pg1184.txt'),
+        ('Moby Dick; Or, The Whale', 'Herman Melville', 'pg2701.cover.medium.jpg', 'pg2701.txt'),
+        ('Romeo and Juliet', 'William Shakespeare', 'pg1513.cover.medium.jpg', 'pg1513.txt'),
+        ('Pride and Prejudice', 'Jane Austen', 'pg1342.cover.medium.jpg', 'pg1342.txt'),
+        ('Dracula', 'Bram Stoker', 'pg345.cover.medium.jpg', 'pg345.txt')
 
+
+    ]
+    
+
+    for i, (title, author, imageurl, url) in enumerate(bookData):
+        app.books.append(Books(i, app, title, author, imageurl, url))
+
+
+
+def doNothing():
+    pass
 
 def makeButtons(app):
     app.buttons = []
-    darkPastelBlue = rgb(115, 115, 115)
-    buttonsSpacingInMenu = 50
-    app.libraryButton = Buttons(app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX- app.menuWidth,
-                                app.displayScreenTop + app.displayScreenOffsetY + app.burgerAndMenuOffset, 
-                                app.menuWidth - 2.5, app.menuHeight//4,
-                                'white', darkPastelBlue, 'Library', None )
-    app.buttons.append(app.libraryButton)
-    app.continueReading = Buttons(app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX - app.menuWidth,
-                                app.displayScreenTop + app.displayScreenOffsetY + app.burgerAndMenuOffset + buttonsSpacingInMenu, 
-                                app.menuWidth - 2.5, app.menuHeight//4,
-                                'white', darkPastelBlue, 'continue Reading', None)
-    app.buttons.append(app.continueReading)
-    app.useFinger = Buttons(app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX - app.menuWidth,
-                                app.height - 50, 
-                                app.menuWidth - 2.5, app.menuHeight//4,
-                                'white', darkPastelBlue, 'finger', None)
-    app.buttons.append(app.useFinger)
+
+    # ── bottom toolbar (always visible) ──────────────────────────
+    def goHome():
+        app.defaultScreen, app.libraryScreen, app.readingScreen = True, False, False
+    def goLibrary():
+        app.defaultScreen, app.readingScreen, app.libraryScreen = False, False, True
+    def goContinue():
+        if app.currentRead:
+            app.defaultScreen = app.libraryScreen = False
+            app.readingScreen = True
+            makeCurrentBook(app, app.currentRead)
+    def toggleFinger():
+        app.usingCamera = True
+        app.gestureController.start()
+
+    bottomRow = makeButtonRow(
+        labels      = ['Home', 'Library', 'Continue', 'Index'],
+        onClickFunctions  = [goHome, goLibrary, goContinue, toggleFinger],
+        rowCenterY  = app.height - 30,
+        totalWidth  = app.width,
+        btnHeight   = 40,
+        color       = rgb(90, 90, 90),
+        hoverColor  = rgb(140, 140, 140),
+        fontSize    = 12,
+    )
+    app.homeButton, app.libraryButton, app.continueReading, app.useFinger = bottomRow
+    app.buttons.extend(bottomRow)
+
+    # ── burger-menu column (shown only when burgerPressed) ────────
+    menuX   = app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX - app.menuWidth
+    menuTop = app.displayScreenTop  + app.displayScreenOffsetY + app.burgerAndMenuOffset + 30
+    spacing = 45
+    menuLabels = ['Library', 'Continue', 'Settings']
+    menuFunctions    = [goLibrary, goContinue, doNothing]   # settings = TODO
+
+    app.menuButtons = []
+    for i, (lbl, fn) in enumerate(zip(menuLabels, menuFunctions)):
+        b = Button(menuX, menuTop + i * spacing,
+                   app.menuWidth - 2, 35, lbl, fn,
+                   color=rgb(40, 40, 40), hoverColor=rgb(80, 80, 80), fontSize=12)
+        app.menuButtons.append(b)
+        app.buttons.append(b)
+
+    # keep named refs your existing code already uses
+    app.settingsButton = app.menuButtons[2]
+
+
 
 def onKeyPress(app, key):
     if app.readingScreen:
         if key == 'right' and app.pageIndex < app.totalPages - 1:
             app.pageIndex += 1
+            savePageChangeOnKeyPress(app)
         elif key == 'left' and app.pageIndex > 0:
             app.pageIndex -= 1
+            savePageChangeOnKeyPress(app)
+        elif key == 'c':
+            app.showChapterPanel = not app.showChapterPanel
+        elif key == 'n':
+            app.showNotesPanel = not app.showNotesPanel
+            app.showChapterPanel = False 
+        elif key == 'b':
+            bookmarks = app.currentRead.bookmarks
+            if app.pageIndex in bookmarks:
+                bookmarks.remove(app.pageIndex)
+            else:
+                bookmarks.append(app.pageIndex)
+            saveAllProgress(app)
+        
+        elif key == 'up':
+            if app.showChapterPanel:
+                app.chapterScroll = max(0, app.chapterScroll - 1)
+            elif app.showNotesPanel:
+                app.notesScroll = max(0, app.notesScroll - 1)
+        elif key == 'down':
+            
+            if app.showChapterPanel:
+                maxScroll = max(0, len(app.chapters) - 10)
+                app.chapterScroll = min(maxScroll, app.chapterScroll + 1)
+            elif app.showNotesPanel:
+                totalEntries = len(app.currentRead.bookmarks) + len(app.highlights) + len(app.notes)
+                app.notesScroll = min(max(0, totalEntries - 10), app.notesScroll + 1)
+        
+        elif key == '=':
+            app.fontSize = min(24, app.fontSize + 1)
+            makeCurrentBook(app, app.currentRead)
+        elif key == '-':
+            app.fontSize = max(10, app.fontSize - 1)
+            makeCurrentBook(app, app.currentRead)
+
+
+
+def savePageChangeOnKeyPress(app):
+        app.currentRead.saveProgress(app.pageIndex)
+        saveAllProgress(app)
 
 def onMousePress(app, mouseX, mouseY):
     checkBurgerPressed(app, mouseX, mouseY)
-    
-    if app.libraryButton in getButtonPressed(app, mouseX, mouseY):
-        app.defaultScreen = False
-        app.readingScreen = False
-        app.libraryScreen = True
-    
 
-    
-    if app.continueReading in getButtonPressed(app, mouseX, mouseY):
-        if app.currentRead is not None:
-            app.libraryScreen = False
-            app.defaultScreen = False
-            app.readingScreen = True
-            makeCurrentBook(app, app.currentRead)
-    
-    if app.useFinger in getButtonPressed(app, mouseX, mouseY):
-        app.usingCamera = True
-        app.gestureController.start()
-    
-    
-
-    
+    for button in app.buttons:
+        button.handleClick(mouseX, mouseY)
+    if app.readingScreen:
+        handleToolbarClick(app, mouseX, mouseY)
+        handlePageclick(app, mouseX, mouseY)
     if app.libraryScreen:
         currRead = getBookPressed(app, mouseX, mouseY)
         if currRead is not None:
-            app.readingScreen = True    # set FIRST
+            app.readingScreen = True  
             app.libraryScreen = False
             app.defaultScreen = False
-            makeCurrentBook(app, currRead)  # called SECOND, after readingScreen is True
+            makeCurrentBook(app, currRead) 
+
+def handleToolbarClick(app, mouseX, mouseY):
+    toolbarY = app.bookBoxTop + app.bookBoxHeight - 38
+    toolbarHeight = 30
+    buttonWidth = 80
+    gap = 10
+    startX = app.bookBoxLeft + app.margin
+
+    highlightX = startX
+    noteX = startX + (buttonWidth + gap)
+    bookmarkX = startX + 2 * (buttonWidth + gap)
+
+    if toolbarY <= mouseY <= toolbarY + toolbarHeight:
+        if highlightX <= mouseX <= highlightX + buttonWidth:
+            app.activeHighlight = not app.activeHighlight
+            app.activeNote = False
+            app.activeBookmark = False
+        elif noteX <= mouseX <= noteX + buttonWidth:
+            app.activeNote = not app.activeNote
+            app.activeHighlight = False
+            app.activeBookmark = False
+        elif bookmarkX <= mouseX <= bookmarkX + buttonWidth:
+            app.activeBookmark = not app.activeBookmark
+            app.activeHighlight = False
+            app.activeNote = False
+
+def handlePageclick(app, mouseX, mouseY):
+    insideBox = (app.bookBoxLeft <= mouseX <= app.bookBoxLeft + app.bookBoxWidth and
+                  app.bookBoxTop <= mouseY <= app.bookBoxTop + app.bookBoxHeight - 40)
+    if not insideBox:
+        return
+    pageKey = app.pageIndex
+    if app.activeBookmark:
+        if pageKey in app.currentRead.bookmarks:
+            app.currentRead.bookmarks.remove(pageKey)
+        else:
+            app.currentRead.bookmarks.append(pageKey)
+        saveAllProgress(app)
+    
+    elif app.activeHighlight:
+        if pageKey in app.highlights:
+            app.highlights = {k: v for k, v in app.highlights.items() if k != pageKey}
+        else:
+            app.highlights[pageKey] = True
+    
+    elif app.activeNote:
+        if pageKey in app.notes:
+            app.notes = {k: v for k, v in app.notes.items() if k != pageKey}
+        else:
+            app.notes[pageKey] = '(note)'
+        
 
 def getButtonPressed(app, mouseX, mouseY):
     intersected = []
@@ -224,48 +410,146 @@ def redrawAll(app):
         
     if app.readingScreen:
         drawBook(app)
+        drawHamburgerButton(app)
         app.useFinger.drawButton()
         
     if app.libraryScreen:
         drawLibraryScreen(app)
+        drawHamburgerButton(app)
     #cursor for tracking mediapipe --> drawCircle(app.cursorX, app.cursorY, 10, fill='darkBlue')
     if app.burgerPressed:
         drawBurgerMenu(app)
+        drawHamburgerButton(app)
 
-        
+def extractChapters(pages):
+    chapters = []
+    for pageIndex, pageText in enumerate(pages):
+        for line in pageText.split('\n'):
+            if looksLikeChapterHeading(line):
+                if not chapters or chapters[-1][0] != line.strip():
+                    chapters.append((line.strip(), pageIndex))
+    return chapters
+
+
+
+def looksLikeChapterHeading(line):
+    stripped = line.strip()
+    if not stripped or len(stripped) > 60:
+        return False
+    lower = stripped.lower()
+    keywords = ['chapter', 'act', 'part', 'book', 'section', 'prologue', 'epilogue']
+    for word in keywords:
+        if lower.startswith(word):
+            return True
+
+    if stripped.isupper() and 3 < len(stripped) < 50:
+        return True
+    if stripped.endswith('.') and stripped[:-1].isdigit():
+        return True
+    return False
+
+
 def drawBook(app):
-    drawRect(0,0, app.width, app.height, fill = 'ivory')
+
+    drawRect(app.bookBoxLeft, app.bookBoxTop, app.bookBoxWidth, app.bookBoxHeight, fill = 'ivory')
     pageText = app.pages[app.pageIndex]
     drawWrappedText(app, pageText)
-    drawLabel(f'Page {app.pageIndex + 1} of {app.totalPages}', app.width / 2, app.height - 20, fill='white', size = 13)
+
+    drawLabel(f'Page {app.pageIndex + 1} of {app.totalPages}',
+             app.bookBoxLeft + app.bookBoxWidth//2, app.bookBoxTop + app.bookBoxHeight - 15,
+             fill = rgb(80,80,80), size = 12)
+
+    if app.pageIndex in app.currentRead.bookmarks:
+        drawPolygon(app.bookBoxLeft + app.bookBoxWidth - 24, app.bookBoxTop,
+                    app.bookBoxLeft + app.bookBoxWidth, app.bookBoxTop,
+                    app.bookBoxLeft + app.bookBoxWidth, app.bookBoxTop + 30,
+                    fill = rgb(210,100,70))
+        drawLabel('🔖', app.bookBoxLeft + app.bookBoxWidth - 12, app.bookBoxTop + 14, size = 10)
+
+    drawRect(0, 0, app.width, 22, fill = rgb(220, 215, 205))
+    drawLabel('C = chapters | N = notes | B = bookmark | < > = turn page',
+            app.width//2, 11, fill = rgb(120,120,120), size = 9)
+
+    if app.showChapterPanel:
+        drawChapterPanel(app)
+    if app.showNotesPanel:
+        drawAnnotationsPanel(app)
+
+    drawToolbar(app)
+    
+    
+
 
 def drawWrappedText(app, text):
-    maxWidth = app.width - 2*app.margin
+    left = app.bookBoxLeft + app.margin
+    right = app.bookBoxLeft + app.bookBoxWidth - app.margin
+    maxWidth = right - left
+    centerX = left + maxWidth // 2
     charsPerLine = int(maxWidth / (app.fontSize * 0.55))
-    y = 70
+    y = app.bookBoxTop + 30
+
+    if app.pageIndex in app.highlights:
+        drawRect(app.bookBoxLeft, app.bookBoxTop,
+                app.bookBoxWidth, app.bookBoxHeight - 40,
+                fill = rgb(255, 255, 180), opacity = 40)
+
+    if app.pageIndex in app.notes:
+        drawLabel('📝', app.bookBoxLeft + 12, app.bookBoxTop + 12, size=13)
+
     for paragraph in text.split('\n\n'):
         words = paragraph.split()
         line = ''
         for word in words:
             test = line + (' ' if line else '') + word
             if len(test) > charsPerLine:
-                drawLabel(line, app.margin, y, align='left', size = app.fontSize, fill = 'black')
+                drawLabel(line, centerX, y, align = 'center',
+                        size = app.fontSize, fill = 'black')
                 y += app.lineHeight
                 line = word
-                if y > app.height - 50:
+                if y > app.bookBoxTop + app.bookBoxHeight - 30:
                     return
             else:
                 line = test
         if line:
-            drawLabel(line, app.margin, y, align = 'left', size = app.fontSize, fill='black')
+            
+            drawLabel(line, centerX, y, align = 'center',
+                    size = app.fontSize, fill='black')
             y += app.lineHeight
-        y += app.lineHeight //2
-        if y > app.height - 50:
+        y += app.lineHeight // 2
+        if y > app.bookBoxTop + app.bookBoxHeight - 30:
             return
+
+def drawToolbar(app):
+    toolbarY = app.bookBoxTop + app.bookBoxHeight - 38
+    toolbarHeight = 30
+    buttonWidth = 80
+    gap = 10
+    startX = app.bookBoxLeft + app.margin
+
+    tools = [
+        ('Highlight', 'activeHighlight', rgb(225, 220, 50), rgb(180,150,10)),
+        ('Note', 'activeNote', rgb(100, 160, 255), rgb(50,100,200)),
+        ('Bookmark', 'activeBookmarks', rgb(210, 100, 70),  rgb(150,50,30))
+    ]
+
+    for i, (label, flag, onColor, pressedColor) in enumerate(tools):
+        x = startX + i * (buttonWidth + gap)
+        if flag == 'activeHighlight':
+            isActive = app.activeHighlight
+        elif flag == 'activeNote':
+            isActive = app.activeNote
+        else:
+            isActive = app.activeBookmark
+        color = pressedColor if isActive else onColor
+        drawRect(x, toolbarY, buttonWidth, toolbarHeight, fill = color)
+        drawLabel(label, x + buttonWidth//2, toolbarY + toolbarHeight // 2,
+                fill = 'white', size = 11, bold = isActive)
 
 def onMouseMove(app, mouseX, mouseY):
     app.cursorX = mouseX
     app.cursorY = mouseY
+    for button in app.buttons:
+        button.handleHover(mouseX, mouseY)
     
     #BOUND MOUSE MOTIONif app.cursorY
     
@@ -309,9 +593,9 @@ def drawLibraryScreen(app):
     turqoise = rgb(188, 221, 212)
     
     lightGray = rgb(226, 226, 226)
-    lightGrayBkg = curvedRect(app,app.width//2, app.height//2-20,
+    lightGrayBkg = curvedRect(app,app.width//2, app.height//2-15,
                               app.width - 100 - 2*app.displayScreenOffsetX, 
-                              app.height - 100 - 2*app.displayScreenOffsetY, 
+                              app.height - 150 - 2*app.displayScreenOffsetY, 
                               lightGray)
     lightGrayBkg.draw()
     
@@ -325,7 +609,6 @@ def drawLibraryScreen(app):
     #DRAW CIRCLES
     Books.drawCovers(app)
 
-
 def drawDefaultScreen(app):
     defaultScreenURL = 'defaultScreen.png'
     imageWidth, imageHeight = getImageSize(defaultScreenURL)
@@ -333,11 +616,14 @@ def drawDefaultScreen(app):
     
 
 def drawBurgerMenu(app):
-    drawRect(app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX - app.menuWidth,
-             app.displayScreenTop + app.displayScreenOffsetY + app.burgerAndMenuOffset, app.menuWidth, app.menuHeight, fill='black')
-    
-    app.libraryButton.drawButton()
-    app.continueReading.drawButton()
+    menuX = app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX - app.menuWidth
+    menuTop = app.displayScreenTop + app.displayScreenOffsetY + app.burgerAndMenuOffset
+    menuURL = 'menu.png'
+    imageWidth, imageHeight = getImageSize(menuURL)
+    drawImage(menuURL, menuX - 30, menuTop, width=imageWidth//1.5, height=imageHeight//2)
+    for button in app.menuButtons:
+        button.draw()
+
     
 def drawHamburgerButton(app):
     hamburgerLineLength = 17
@@ -347,51 +633,203 @@ def drawHamburgerButton(app):
     drawLine(app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX - hamburgerLineLength, app.displayScreenTop + app.displayScreenOffsetY + spacing, app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX, app.displayScreenTop + app.displayScreenOffsetY + spacing, fill = hamburgerColor, lineWidth = 3)
     drawLine(app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX - hamburgerLineLength, app.displayScreenTop + app.displayScreenOffsetY + spacing*2, app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX, app.displayScreenTop + app.displayScreenOffsetY + spacing*2, fill = hamburgerColor, lineWidth = 3)
 
-class Buttons:
-    def __init__(self, left, top, width, height, textColor, backgroundColor, text,imageURL):
-        self.textColor = textColor
-        self.backgroundColor = backgroundColor
-        self.text = text
+
+def drawChapterPanel(app):
+    panelWidth = 195
+    panelX = app.bookBoxLeft + app.bookBoxWidth - panelWidth
+    panelTop = app.bookBoxTop
+    panelHeight = app.bookBoxHeight
+
+    drawRect(panelX, panelTop, panelWidth, panelHeight, fill = rgb(25,25,25), opacity = 93)
+    drawLabel('Chapters', panelX + panelWidth//2, panelTop + 18, fill='white', size = 13, bold=True)
+    drawLine(panelX, panelTop + 32, panelX + panelWidth, panelTop + 32, fill=rgb(80,80,80))
+
+    lineHeight = 30
+    scroll = app.chapterScroll
+    maxVisible = (app.height - 80)//lineHeight
+
+    for i, (name, pageIndex) in enumerate(app.chapters[scroll : scroll + maxVisible]):
+        y = panelTop + 48 + i * lineHeight
+        absIndex = i + scroll
+
+        #AI help with highlighting chapter reader is currently in
+        isCurrent = (
+            pageIndex <= app.pageIndex and
+            (absIndex + 1 >= len(app.chapters) or app.chapters[absIndex + 1][1] > app.pageIndex)
+        )
+        if isCurrent:
+            drawRect(panelX, y - 10, panelWidth, lineHeight, fill=rgb(50,80,60))
+
+        display = name if len(name) <= 26 else name[:23] + '...'
+        color = rgb(120,220,160) if isCurrent else 'white'
+        drawLabel(display, panelX + 8, y, align = 'left', size = 11, fill = color)
+    
+    if scroll > 0:
+        drawLabel('▲', panelX + panelWidth//2, panelTop + 44, fill = rgb(150,150,150), size = 10)
+    if scroll + maxVisible < len(app.chapters):
+        drawLabel('▼', panelX + panelWidth//2, panelTop + panelHeight - 15, fill = rgb(150,150,150), size = 10)
+
+
+def getEntryPage(entry):
+    return entry[1]
+
+def drawAnnotationsPanel(app):
+    panelWidth = 195
+    panelX = app.bookBoxLeft + app.bookBoxWidth - panelWidth
+    panelTop = app.bookBoxTop
+    panelHeight = app.bookBoxHeight
+
+    drawRect(panelX, panelTop, panelWidth, panelHeight, fill = rgb(20, 20, 40), opacity = 95)
+    drawLabel('Bookmarks & Notes', panelX + panelWidth // 2, panelTop + 18,
+                fill = 'white', size = 11, bold = True)
+    drawLine(panelX, panelTop + 32, panelX + panelWidth, panelTop + 32, fill = rgb(80,80,80))
+
+    lineHeight = 28
+    y = panelTop + 44
+    scroll = app.notesScroll
+    allEntries = []
+    
+    for pageNum in app.currentRead.bookmarks:
+        allEntries.append(('🔖', pageNum, f'Bookmark p.{pageNum + 1}'))
+    for pageNum in app.highlights:
+        allEntries.append(('🟡', pageNum, f'Highlight p.{pageNum + 1}'))
+    for pageNum in app.notes:
+        allEntries.append(('📝', pageNum, f'Note p.{pageNum + 1}'))
+
+    allEntries.sort(key = getEntryPage)
+    maxVisible = (panelHeight - 60) // lineHeight
+    visibleEntries = allEntries[scroll: scroll + maxVisible]
+
+    if not allEntries:
+        drawLabel('Nothing saved yet', panelX + panelWidth//2, panelTop + 60,
+                fill = rgb(150,150,150), size = 10)
+    else:
+    
+        for icon, pageNum, label in visibleEntries:
+            drawLabel(icon + ' ' + label, panelX + 8, y, align = 'left', size = 10, fill = 'white')
+            y += lineHeight
+    
+    if scroll > 0:
+        drawLabel('▲', panelX + panelWidth//2, panelTop + 38, fill = rgb(150,150,150), size = 10)
+    if scroll + maxVisible < len(allEntries):
+        drawLabel('▼', panelX + panelWidth//2, panelTop + panelHeight - 10, fill = rgb(150,150,150), size=10)
+
+
+class Button:
+    def __init__(self, left, top, width, height, text, onClickFunction=None, **kwargs):
+        self.left = left
+        self.top = top
         self.width = width
         self.height = height
-        self.left = left
-        self.top = top
-        if imageURL != None:
-            self.URL = imageURL
-    
-    def __repr__(self):
-        return f'button:{self.text}'
-    
-    def intersect(self, x, y):
-        upperX = self.width + self.left
-        upperY = self.height + self.top
-        return self.left <= x <= upperX and self.top <= y <= upperY
+        self.text = text
+        self.onClickFunction = onClickFunction
 
-    def drawButton(self):
-        if None not in (self.left, self.top, self.width, self.height):
-            drawRect(self.left, self.top, self.width, self.height, fill = self.backgroundColor)
-            drawLabel(self.text, self.left + self.width//2, self.top + self.height//2, fill=self.textColor)
-        else:
-            raise Exception("Haven't set button size and position yet before drawing")
-    
-    def __hash__(self):
-        return hash(str(self))
-    
+        # Optional styling via **kwargs with sensible defaults
+        self.color         = kwargs.get('color', rgb(115, 115, 115))
+        self.hoverColor    = kwargs.get('hoverColor', rgb(160, 160, 160))
+        self.textColor     = kwargs.get('textColor', 'white')
+        self.fontSize      = kwargs.get('fontSize', 13)
+        self.bold          = kwargs.get('bold', False)
+        self.borderColor   = kwargs.get('borderColor', None)
+        self.borderWidth   = kwargs.get('borderWidth', 0)
+        self.roundness     = kwargs.get('roundness', 6)   # corner rounding (visual only)
+        self.visible       = kwargs.get('visible', True)
+
+        self.isHovered = False
+
+    # ── geometry helpers ──────────────────────────────────────────
+    @property
+    def centerX(self): return self.left + self.width / 2
+    @property
+    def centerY(self): return self.top + self.height / 2
+
+    def contains(self, x, y):
+        return self.left <= x <= self.left + self.width and \
+               self.top  <= y <= self.top  + self.height
+
+    # ── event handlers ────────────────────────────────────────────
+    def handleClick(self, mouseX, mouseY):
+        if self.visible and self.contains(mouseX, mouseY) and self.onClickFunction:
+            self.onClickFunction()
+
+    def handleHover(self, mouseX, mouseY):
+        self.isHovered = self.visible and self.contains(mouseX, mouseY)
+
+    # ── drawing ───────────────────────────────────────────────────
+    def draw(self):
+        if not self.visible:
+            return
+        fill = self.hoverColor if self.isHovered else self.color
+
+        drawRect(self.left, self.top, self.width, self.height,
+                 fill=fill,
+                 border=self.borderColor,
+                 borderWidth=self.borderWidth)
+
+        drawLabel(self.text, self.centerX, self.centerY,
+                  fill=self.textColor,
+                  size=self.fontSize,
+                  bold=self.bold)
+
+    # ── compatibility with your existing code ─────────────────────
+    def intersect(self, x, y):   return self.contains(x, y)
+    def drawButton(self):        self.draw()
+
+    def __repr__(self):  return f'Button({self.text!r})'
+    def __hash__(self):  return hash(self.text)
     def __eq__(self, other):
-        return isinstance(other, Buttons) and (self.text, self.backgroundColor, self.textColor) == (other.text, other.backgroundColor, other.textColor)
+        return isinstance(other, Button) and self.text == other.text
+
+
+# ── layout helper: builds a row of evenly-spaced buttons ──────────
+def makeButtonRow(labels, onClickFunctions, rowCenterY, totalWidth,
+                  btnHeight=35, padding=10, **kwargs):
+    n = len(labels)
+    btnWidth = (totalWidth - padding * (n + 1)) / n
+    buttons = []
+    for i, (label, function) in enumerate(zip(labels, onClickFunctions)):
+        left = padding + i * (btnWidth + padding)
+        top  = rowCenterY - btnHeight / 2
+        buttons.append(Button(left, top, btnWidth, btnHeight, label, function, **kwargs))
+    return buttons
 
 class Books:
-    def __init__(self, left, top, title, author, numPages, imageURL, URL):
-        self.left = left
-        self.top = top
+
+    def __init__(self, index, app, title, author, imageURL, URL):
+        self.shelf = index // app.numBooksPerShelf
+        # A book is arranged in a certain order on a shelf based on its index
+        self.orderInShelf = index % app.numBooksPerShelf
+        shelfStartX = 100
+        self.left = shelfStartX + self.orderInShelf * app.bookSpaceX
+        self.top = int(app.height*(2/3)) - self.shelf * app.bookSpaceY
+        # A book is on shelf 1,2, or 3 based on its index in app.books
+        
         self.title = title
         self.URL = URL
+        self.bookmarks = []
         self.author = author
         self.coverImage = imageURL
-        self.numPages = numPages
         self.currentlyReading = False
         self.currPage = 0
         self.currentlyOpen = False
+        self.totalPages = 0
+    
+    def saveProgress(self, currPage):      
+        self.currPage = currPage
+
+    def loadProgress(self):                
+        try:
+            with open('progress.txt', 'r') as f:
+                for line in f:
+                    parts = line.strip().split('|')
+                    if len(parts) < 3:
+                        continue
+                    title, currPage, bookmarks = parts[0], int(parts[1]), parts[2]
+                    if self.title == title:
+                        self.currPage = currPage
+                        self.bookmarks = [int(p) for p in bookmarks.split(',') if p]
+        except FileNotFoundError:
+            pass
 
     def getURL(self):
         return self.URL
@@ -401,16 +839,21 @@ class Books:
         for book in app.books:
             imageWidth, imageHeight = getImageSize(book.coverImage)
             drawImage('bookIcon.png', book.left, book.top, align = 'center',
-                    width=imageWidth//1.5, height=imageHeight//1.5)
+                    width=imageWidth//1.5, height=imageHeight//1.8)
             drawImage(book.coverImage, book.left + 7, book.top - 5, align='center',
                     width=imageWidth//3.5, height=imageHeight//3.5)
+            if book.totalPages > 0:
+                barW = imageWidth // 2.5
+                progress = book.currPage / book.totalPages
+                drawRect(book.left - barW//2, book.top + 55, barW, 5, fill = rgb(200,200,200))
+                drawRect(book.left - barW//2, book.top + 55, int(barW * progress), 5, fill = rgb(100,180,140))
     
     def intersect(self, x, y):
         imageWidth, imageHeight = getImageSize(self.coverImage)
-        halfW = imageWidth // 4
-        halfH = imageHeight // 4
-        return (self.left - halfW <= x <= self.left + halfW and
-                self.top - halfH <= y <= self.top + halfH)
+        width = imageWidth // 3.5
+        height = imageHeight // 3.5
+        return (self.left - width//2 <= x <= self.left + width//2 and
+                self.top - height//2 <= y <= self.top + height//2)
 
     def __repr__(self):
         return f'book: Author{self.author} Title{self.title}'
