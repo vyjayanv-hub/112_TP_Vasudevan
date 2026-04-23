@@ -37,6 +37,9 @@ def onAppStart(app):
 
     app.notes = {}
     app.highlights = {}
+    app.highlightStart = None
+    app.showNotePopup = False
+    app.notePopupText = ''
     app.activeHighlight = False #checks if highlight mode is on
     app.activeNote = False
     app.noteText = ''
@@ -67,10 +70,10 @@ def onAppStart(app):
     app.burgerAndMenuOffset = 22
     app.menuHeight = 180
 
-    app.bookBoxLeft = app.displayScreenLeft
-    app.bookBoxTop = app.displayScreenTop + 25
-    app.bookBoxWidth = app.displayScreenWidth
-    app.bookBoxHeight = app.height - 160
+    app.bookBoxLeft = 60
+    app.bookBoxTop = 22
+    app.bookBoxWidth = app.width - 60
+    app.bookBoxHeight = app.height - 80
     app.margin = 30
 
     makeButtons(app)
@@ -241,9 +244,9 @@ def makeButtons(app):
     menuFunctions    = [goLibrary, goContinue, doNothing]   # settings = TODO
 
     app.menuButtons = []
-    for i, (lbl, fn) in enumerate(zip(menuLabels, menuFunctions)):
+    for i, (label, function) in enumerate(zip(menuLabels, menuFunctions)):
         b = Button(menuX, menuTop + i * spacing,
-                   app.menuWidth - 2, 35, lbl, fn,
+                   app.menuWidth - 2, 35, label, function,
                    color=rgb(40, 40, 40), hoverColor=rgb(80, 80, 80), fontSize=12)
         app.menuButtons.append(b)
         app.buttons.append(b)
@@ -317,27 +320,37 @@ def onMousePress(app, mouseX, mouseY):
             app.defaultScreen = False
             makeCurrentBook(app, currRead) 
 
-def handleToolbarClick(app, mouseX, mouseY):
-    toolbarY = app.bookBoxTop + app.bookBoxHeight - 38
-    toolbarHeight = 30
-    buttonWidth = 80
-    gap = 10
-    startX = app.bookBoxLeft + app.margin
 
-    highlightX = startX
-    noteX = startX + (buttonWidth + gap)
-    bookmarkX = startX + 2 * (buttonWidth + gap)
+def onMouseRelease(app, mouseX, mouseY):
+    if app.readingScreen and app.activeHighlight and app.highlightStart is not None:
+
+
+def handleToolbarClick(app, mouseX, mouseY):
+    toolbarX = 0
+    toolbarWidth = 58
+    toolbarTop = 22
+    buttonHeight = 70
+    gap = 8
+
+    if not (toolbarX <= mouseX <= toolbarWidth):
+        return
+
+
+
+    highlightY = toolbarTop + gap
+    noteY = toolbarTop + gap + (buttonWidth + gap)
+    bookmarkY = toolbarTop + gap + 2 * (buttonHeight + gap)
 
     if toolbarY <= mouseY <= toolbarY + toolbarHeight:
         if highlightX <= mouseX <= highlightX + buttonWidth:
             app.activeHighlight = not app.activeHighlight
             app.activeNote = False
             app.activeBookmark = False
-        elif noteX <= mouseX <= noteX + buttonWidth:
+        elif noteY <= mouseY <= noteY + buttonWidth:
             app.activeNote = not app.activeNote
             app.activeHighlight = False
             app.activeBookmark = False
-        elif bookmarkX <= mouseX <= bookmarkX + buttonWidth:
+        elif bookmarkY <= mouseY <= bookmarkY + buttonWidth:
             app.activeBookmark = not app.activeBookmark
             app.activeHighlight = False
             app.activeNote = False
@@ -356,16 +369,13 @@ def handlePageclick(app, mouseX, mouseY):
         saveAllProgress(app)
     
     elif app.activeHighlight:
-        if pageKey in app.highlights:
-            app.highlights = {k: v for k, v in app.highlights.items() if k != pageKey}
-        else:
-            app.highlights[pageKey] = True
+        charIndex = getCharIndexAtClick(app, mouseX, mouseY)
+        if charIndex is not None:
+            app.highlightStart = charIndex
     
     elif app.activeNote:
-        if pageKey in app.notes:
-            app.notes = {k: v for k, v in app.notes.items() if k != pageKey}
-        else:
-            app.notes[pageKey] = '(note)'
+        app.showNotePopup = True
+        app.notePopupText = app.notes.get(pageKey, '')
         
 
 def getButtonPressed(app, mouseX, mouseY):
@@ -477,7 +487,42 @@ def drawBook(app):
 
     drawToolbar(app)
     
-    
+def getCharIndexAtClick(app, mouseX, mouseY):
+    left = app.bookBoxLeft + app.margin
+    right = app.bookBoxLeft + app.bookBoxWidth - app.margin
+    maxWidth = right - left
+    charsPerLine = int(maxWidth / (app.fontSize * 0.55))
+    y = app.bookBoxTop + 30
+    charIndex = 0
+    text = app.pages[app.pageIndex]
+
+    for paragraph in text.split('\n\n'):
+        words = paragraph.split()
+        line = ''
+        lineStartIndex = charIndex
+        for word in words:
+            test = line + (' ' if line else '') + word
+            if len(test) > charsPerLine:
+                lineY = y
+                if abs(mouseY - lineY) < app.lineHeight//2:
+                    charOffset = int((mouseX - left) / (app.fontSize * 0.55))
+                    return lineStartIndex + min(charOffset, len(line))
+                y += app.lineHeight
+                lineStartIndex = charIndex
+                line = word
+        else:
+            line = test
+        charIndex += len(word) + 1
+
+        if line:
+            if abs(mouseY - y) < app.lineHeight // 2:
+                charOffset = int((mouseX - left) / (app.fontSize * 0.55))
+                return lineStartIndex + min(charOffset, len(line))
+            y += app.lineHeight
+        y += app.lineHeight //2
+        charIndex += 2
+
+
 
 
 def drawWrappedText(app, text):
@@ -520,30 +565,27 @@ def drawWrappedText(app, text):
             return
 
 def drawToolbar(app):
-    toolbarY = app.bookBoxTop + app.bookBoxHeight - 38
-    toolbarHeight = 30
-    buttonWidth = 80
-    gap = 10
-    startX = app.bookBoxLeft + app.margin
+    toolbarX = 0
+    toolbarWidth = 58
+    toolbarTop = 22
+    buttonWidth = app.height - 80
+    buttonHeight = 70
+    gap = 8
+    
+    drawRect(toolbarX, toolbarTop, toolbarWidth, toolbarHeight, fill = rgb(40,40,40))
 
     tools = [
-        ('Highlight', 'activeHighlight', rgb(225, 220, 50), rgb(180,150,10)),
-        ('Note', 'activeNote', rgb(100, 160, 255), rgb(50,100,200)),
-        ('Bookmark', 'activeBookmarks', rgb(210, 100, 70),  rgb(150,50,30))
+        ('🖊','Highlight', 'activeHighlight', rgb(225, 220, 50), rgb(180,150,10)),
+        ('📝','Note', 'activeNote', rgb(100, 160, 255), rgb(50,100,200)),
+        ('🔖','Bookmark', 'activeBookmarks', rgb(210, 100, 70),  rgb(150,50,30))
     ]
 
-    for i, (label, flag, onColor, pressedColor) in enumerate(tools):
-        x = startX + i * (buttonWidth + gap)
-        if flag == 'activeHighlight':
-            isActive = app.activeHighlight
-        elif flag == 'activeNote':
-            isActive = app.activeNote
-        else:
-            isActive = app.activeBookmark
+    for i, (icon, label, flag, onColor, pressedColor) in enumerate(tools):
+        y = toolbarTop + gap + i * (buttonHeight + gap)
         color = pressedColor if isActive else onColor
-        drawRect(x, toolbarY, buttonWidth, toolbarHeight, fill = color)
-        drawLabel(label, x + buttonWidth//2, toolbarY + toolbarHeight // 2,
-                fill = 'white', size = 11, bold = isActive)
+        drawRect(toolbarX + 4, y, toolbarWidth - 8, y + buttonHeight, fill = color)
+        drawLabel(icon, toolbarX + toolbarWidth//2, y + buttonHeight//2 - 10, size = 16)
+        drawLabel(label, toolbarX + toolbarWidth//2, y + buttonHeight//2 + 12, size = 8, fill='white')
 
 def onMouseMove(app, mouseX, mouseY):
     app.cursorX = mouseX
