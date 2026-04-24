@@ -89,14 +89,53 @@ def onAppStart(app):
 
 # Standalone functions (outside any class) - you already have these, keep them
 def saveAllProgress(app):
-    with open('progress.txt', 'w') as f:
+    with open('progress.txt', 'w') as progressFile:
         for book in app.books:
-            bms = ','.join(str(p) for p in book.bookmarks)
-            f.write(f'{book.title}|{book.currPage}|{bms}\n')
+            bookmarkString = ','.join(str(p) for p in book.bookmarks)
+            progressFile.write(f'BOOK|{book.title}|{book.currPage}|{bookmarkString}\n')
+    with open('highlights.txt', 'w') as highlightsFile:
+        for bookTitle, pageDict in app.allHighlights.items():
+            for pageKey, rangeList in pageDict.items():
+                for startChar, endChar in rangeList:
+                    highlightFile.write(f'{bookTitle}|{pageKey}|{startChar}|{endChar}\n')
+    with open('notes.txt', 'w') as notesFile:
+        for bookTitle, pageDict in app.allNotes.items():
+            for pageKey, noteText in pageDict.items():
+                notesFile.write(f'{bookTitle}|{pageKey}|{noteText}\n')
 
 def loadAllProgress(app):
     for book in app.books:
         book.loadProgress()
+    try:
+        with open('highlights.txt', 'r') as highlightFile:
+            for line in highlightFile:
+                parts = line.strip().split('|')
+                if len(parts) == 4:
+                    bookTitle = parts[0]
+                    pageKey = parts[1]
+                    startChar = parts[2]
+                    endChar = parts[3]
+                    if bookTitle not in app.allHighlights:
+                        app.allHighlights[bookTitle] = dict()
+                    if pageKey not in app.allHighlights[bookTitle]:
+                        app.allHighlights[bookTitle][pageKey] = []
+                    app.allHighlights[bookTitle][pageKey].append((startChar, endChar))
+    except FileNotFoundError:
+        pass
+    try:
+        with open('notes.txt', 'r') as notesFile:
+            for line in notesFile:
+                parts = line.strip().split('|')
+                if len(parts) == 3:
+                    bookTitle = parts[0]
+                    pageKey = int(parts[1])
+                    noteText = parts[2]
+                    if bookTitle not in app.allNotes:
+                        app.allHighlights[bookTitle][pageKey] = dict()
+                    app.allNotes[bookTitle][pageKey] = noteText
+    except FileNotFoundError:
+        pass
+        
 
 ###################################################
 #AI for using gesture model
