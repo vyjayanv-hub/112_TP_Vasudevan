@@ -22,6 +22,8 @@ def onAppStart(app):
     app.currentRead = None
     app.stepsPerSecond = 30
 
+    app.burgerHovered = False
+
 
 
     app.bookSpaceY = 150
@@ -97,7 +99,7 @@ def saveAllProgress(app):
         for bookTitle, pageDict in app.allHighlights.items():
             for pageKey, rangeList in pageDict.items():
                 for startChar, endChar in rangeList:
-                    highlightFile.write(f'{bookTitle}|{pageKey}|{startChar}|{endChar}\n')
+                    highlightsFile.write(f'{bookTitle}|{pageKey}|{startChar}|{endChar}\n')
     with open('notes.txt', 'w') as notesFile:
         for bookTitle, pageDict in app.allNotes.items():
             for pageKey, noteText in pageDict.items():
@@ -107,8 +109,8 @@ def loadAllProgress(app):
     for book in app.books:
         book.loadProgress()
     try:
-        with open('highlights.txt', 'r') as highlightFile:
-            for line in highlightFile:
+        with open('highlights.txt', 'r') as highlightsFile:
+            for line in highlightsFile:
                 parts = line.strip().split('|')
                 if len(parts) == 4:
                     bookTitle = parts[0]
@@ -131,7 +133,7 @@ def loadAllProgress(app):
                     pageKey = int(parts[1])
                     noteText = parts[2]
                     if bookTitle not in app.allNotes:
-                        app.allHighlights[bookTitle][pageKey] = dict()
+                        app.allNotes[bookTitle] = dict()
                     app.allNotes[bookTitle][pageKey] = noteText
     except FileNotFoundError:
         pass
@@ -376,37 +378,40 @@ def onMousePress(app, mouseX, mouseY):
 
 def onMouseRelease(app, mouseX, mouseY):
     if app.readingScreen and app.activeHighlight and app.highlightStart is not None:
+        endChar = getCharIndexAtClick(app, mouseX, mouseY):
+        if endChar is not None and endChar != app.highlightStart:
+            pageKey = app.pageIndex
+            start = min(app.highlightStart, endChar)
+            end = max(app.highlightStart, endChar)
+            if pageKey not in app.highlights:
+                app.highlights[pageKey] = []
+            app.highlights[pageKey].append((start, end))
+            app.allHighlights[app.currentRead.title] = app.highlight
+            saveAllProgress(app)
+        app.highlightStart = None
 
 
 def handleToolbarClick(app, mouseX, mouseY):
-    toolbarX = 0
-    toolbarWidth = 58
     toolbarTop = 22
     buttonHeight = 70
     gap = 8
-
-    if not (toolbarX <= mouseX <= toolbarWidth):
-        return
-
-
 
     highlightY = toolbarTop + gap
     noteY = toolbarTop + gap + (buttonWidth + gap)
     bookmarkY = toolbarTop + gap + 2 * (buttonHeight + gap)
 
-    if toolbarY <= mouseY <= toolbarY + toolbarHeight:
-        if highlightX <= mouseX <= highlightX + buttonWidth:
-            app.activeHighlight = not app.activeHighlight
-            app.activeNote = False
-            app.activeBookmark = False
-        elif noteY <= mouseY <= noteY + buttonWidth:
-            app.activeNote = not app.activeNote
-            app.activeHighlight = False
-            app.activeBookmark = False
-        elif bookmarkY <= mouseY <= bookmarkY + buttonWidth:
-            app.activeBookmark = not app.activeBookmark
-            app.activeHighlight = False
-            app.activeNote = False
+    if highlightY <= mouseY <= highlightY + buttonHeight:
+        app.activeHighlight = not app.activeHighlight
+        app.activeNote = False
+        app.activeBookmark = False
+    elif noteY <= mouseY <= noteY + buttonHeight:
+        app.activeNote = not app.activeNote
+        app.activeHighlight = False
+        app.activeBookmark = False
+    elif bookmarkY <= mouseY <= bookmarkY + buttonHeight:
+        app.activeBookmark = not app.activeBookmark
+        app.activeHighlight = False
+        app.activeNote = False
 
 def handlePageclick(app, mouseX, mouseY):
     insideBox = (app.bookBoxLeft <= mouseX <= app.bookBoxLeft + app.bookBoxWidth and
@@ -580,22 +585,23 @@ def drawHighlight(app, text):
         return None
     left = app.bookBoxLeft + app.margin
     right = app.bookBoxLeft + app.bookBoxWidth - app.margin
-    maxWidth = left - right
+    maxWidth = right - left
     centerX = left + maxWidth //2
     charsPerLine = int(maxWidth / (app.fontSize * 0.55))
     charWidth = app.fontSize * 0.55
     y = app.bookBoxTop + 45
-    charIndex == 0
+    charIndex = 0
     ranges = app.highlights[app.pageIndex]
-    overlapStart = max(startChar, lineStartIndex)
-    overlapEnd = min(endChar, lineStartIndex + len(line))
-    pixelX = centerX - (len(line) * charWidth) // 2 + (overlapStart - lineStartIndex) * charWidth
-    pixelWidth = (overlapEnd - overlapStart) * charWidth
+
 
     for word in words:
         test = line + (' ' if line else '') + word
         if len(line) > charsPerLine:
             for startChar, endChar in ranges:
+                overlapStart = max(startChar, lineStartIndex)
+                overlapEnd = min(endChar, lineStartIndex + len(line))
+                pixelX = centerX - (len(line) * charWidth) // 2 + (overlapStart - lineStartIndex) * charWidth
+                pixelWidth = (overlapEnd - overlapStart) * charWidth
                 if overlapStart < overlapEnd:
                     
                     drawRect(pixelX, y - app.lineHeight //2, pixelWidth, app.lineHeight, fill = rgb(255, 240, 80), opacity = 60)
@@ -608,6 +614,10 @@ def drawHighlight(app, text):
         charIndex += len(word) + 1
     
     if line:
+        overlapStart = max(startChar, lineStartIndex)
+        overlapEnd = min(endChar, lineStartIndex + len(line))
+        pixelX = centerX - (len(line) * charWidth) // 2 + (overlapStart - lineStartIndex) * charWidth
+        pixelWidth = (overlapEnd - overlapStart) * charWidth
         for startChar, endChar in ranges:
             if overlapStart < overlapEnd:
                 drawRect(pixelX, y - app.lineHeight // 2, pixelWidth,
@@ -657,7 +667,7 @@ def drawToolbar(app):
     toolbarX = 0
     toolbarWidth = 58
     toolbarTop = 22
-    buttonWidth = app.height - 80
+    toolBarHeight = gap + 3* (buttonHeight + gap)
     buttonHeight = 70
     gap = 8
     
@@ -666,11 +676,17 @@ def drawToolbar(app):
     tools = [
         ('🖊','Highlight', 'activeHighlight', rgb(225, 220, 50), rgb(180,150,10)),
         ('📝','Note', 'activeNote', rgb(100, 160, 255), rgb(50,100,200)),
-        ('🔖','Bookmark', 'activeBookmarks', rgb(210, 100, 70),  rgb(150,50,30))
+        ('🔖','Bookmark', 'activeBookmark', rgb(210, 100, 70),  rgb(150,50,30))
     ]
 
     for i, (icon, label, flag, onColor, pressedColor) in enumerate(tools):
         y = toolbarTop + gap + i * (buttonHeight + gap)
+        if flag == 'activeHighlight':
+            isActive = app.activeHighlight
+        elif flag == 'activeNote':
+            isActive = app.activeNote
+        else:
+            isActive = app.activeBookmark
         color = pressedColor if isActive else onColor
         drawRect(toolbarX + 4, y, toolbarWidth - 8, y + buttonHeight, fill = color)
         drawLabel(icon, toolbarX + toolbarWidth//2, y + buttonHeight//2 - 10, size = 16)
@@ -819,7 +835,7 @@ def drawAnnotationsPanel(app):
     y = panelTop + 44
     scroll = app.notesScroll
     allEntries = []
-    for pageKey, rangeList in app.highlightsitems():
+    for pageKey, rangeList in app.highlights,items():
         for startChar, endChar in rangeList:
             if pageKey < len(app.pages):
                 snippet = app.pages[pageKey][startChar:endChar]
@@ -829,7 +845,7 @@ def drawAnnotationsPanel(app):
                 allEntries.append(('🟡', pageKey, snippet))
     
     for pageKey, noteText in app.notes.items():
-        preview = noteTExt[:28] + '...' if len(noteText) > 28 else noteText:
+        preview = noteText[:28] + '...' if len(noteText) > 28 else noteText
         allEntries.append(('📝', pageKey, preview))
     
     for pageNum in app.currentRead.bookmarks:
