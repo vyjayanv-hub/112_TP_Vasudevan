@@ -12,6 +12,7 @@ def _gestureCallback(result, output_image, timestamp_ms):
     global_latest_hand_result = result
 
 def onAppStart(app):
+    
 
     app.pageIndex = 0
     app.pages = []
@@ -73,6 +74,8 @@ def onAppStart(app):
     app.menuWidth = 100
     app.burgerAndMenuOffset = 22
     app.menuHeight = 180
+    app.menuTop = app.displayScreenTop + app.displayScreenOffsetY  + app.burgerAndMenuOffset
+    app.menuOpen = False
 
     app.bookBoxLeft = 60
     app.bookBoxTop = 22
@@ -259,7 +262,6 @@ def doNothing():
 def makeButtons(app):
     app.buttons = []
 
-    # ── bottom toolbar (always visible) ──────────────────────────
     def goHome():
         app.defaultScreen, app.libraryScreen, app.readingScreen = True, False, False
     def goLibrary():
@@ -273,7 +275,7 @@ def makeButtons(app):
         app.gestureController.start()
 
     bottomRow = makeButtonRow(
-        labels      = ['Home', 'Library', 'Continue', 'Index'],
+        labels      = ['Home', 'Library', 'Continue', ''],
         onClickFunctions  = [goHome, goLibrary, goContinue, toggleFinger],
         rowCenterY  = app.height - 30,
         totalWidth  = app.width,
@@ -283,18 +285,23 @@ def makeButtons(app):
         fontSize    = 12,
     )
     app.homeButton, app.libraryButton, app.continueReading, app.useFinger = bottomRow
+    app.useFinger.image = 'finger.png'
+    app.useFinger.text = ''
+    app.useFinger.width = 50
+    app.useFinger.height = 50
+    app.useFinger.left = app.width - 60
+    app.useFinger.top = app.height - 55
+    
     app.buttons.extend(bottomRow)
-
-    # ── burger-menu column (shown only when burgerPressed) ────────
+    buttonStartY = app.menuTop + 30
     menuX   = app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX - app.menuWidth
-    menuTop = app.displayScreenTop  + app.displayScreenOffsetY + app.burgerAndMenuOffset + 30
     spacing = 45
     menuLabels = ['Library', 'Continue', 'Settings']
     menuFunctions    = [goLibrary, goContinue, doNothing]   # settings = TODO
 
     app.menuButtons = []
     for i, (label, function) in enumerate(zip(menuLabels, menuFunctions)):
-        b = Button(menuX, menuTop + i * spacing,
+        b = Button(menuX, buttonStartY + i * spacing,
                    app.menuWidth - 2, 35, label, function,
                    color=rgb(40, 40, 40), hoverColor=rgb(80, 80, 80), fontSize=12)
         app.menuButtons.append(b)
@@ -377,6 +384,16 @@ def onMousePress(app, mouseX, mouseY):
     if app.showNotePopup:
         return None
 
+    bx1 = app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX - 17
+    bx2 = app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX
+    by1 = app.displayScreenTop + app.displayScreenOffsetY
+    by2 = by1 + 12
+    if bx1 <= mouseX <= bx2 and by1 <= mouseY <= by2:
+        app.menuOpen = not app.menuOpen
+        return 
+    
+    
+
     for button in app.buttons:
         button.handleClick(mouseX, mouseY)
     if app.readingScreen:
@@ -390,6 +407,14 @@ def onMousePress(app, mouseX, mouseY):
             app.libraryScreen = False
             app.defaultScreen = False
             makeCurrentBook(app, currRead) 
+
+    if app.menuOpen:
+        menuX = app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX - app.menuWidth
+        menuTop = app.menuTop
+
+        if not (menuX <= mouseX <= menuX + app.menuWidth and
+                menuTop <= mouseY <= menuTop + app.menuHeight):
+            app.menuOpen = False
 
 
 def onMouseRelease(app, mouseX, mouseY):
@@ -408,9 +433,9 @@ def onMouseRelease(app, mouseX, mouseY):
 
 
 def handleToolbarClick(app, mouseX, mouseY):
-    toolbarTop = 22
-    buttonHeight = 70
-    gap = 8
+    toolbarTop = 50
+    buttonHeight = 55
+    gap = 6
 
     highlightY = toolbarTop + gap
     noteY = toolbarTop + gap + (buttonHeight + gap)
@@ -478,7 +503,7 @@ def redrawAll(app):
         drawLibraryScreen(app)
         drawHamburgerButton(app)
 
-    if app.burgerHovered:
+    if app.menuOpen:
         drawBurgerMenu(app)
         drawHamburgerButton(app)
 
@@ -529,7 +554,9 @@ def drawBook(app):
         return None
 
 
-    drawRect(app.bookBoxLeft, app.bookBoxTop, app.bookBoxWidth, app.bookBoxHeight, fill = 'ivory')
+    turqoise = rgb(188, 221, 212)
+    drawRect(0,0, app.width,app.height,fill=turqoise)
+    drawRect(app.width//2, app.height//2 + 20, app.bookBoxWidth + 50, app.bookBoxHeight + 40, fill = 'ivory',align='center')
     pageText = app.pages[app.pageIndex]
     drawWrappedText(app, pageText)
 
@@ -544,9 +571,9 @@ def drawBook(app):
                     fill = rgb(210,100,70))
         drawLabel('🔖', app.bookBoxLeft + app.bookBoxWidth - 12, app.bookBoxTop + 14, size = 10)
 
-    drawRect(0, 0, app.width, 22, fill = rgb(220, 215, 205))
+    drawRect(0, 0, app.width, 42, fill=rgb(245, 240, 230))
     drawLabel('C = chapters | N = notes | B = bookmark | < > = turn page',
-            app.width//2, 11, fill = rgb(120,120,120), size = 9)
+            app.width//2, 21, fill =rgb(80, 80, 80), size = 21, bold = True)
 
     if app.showChapterPanel:
         drawChapterPanel(app)
@@ -681,17 +708,27 @@ def drawWrappedText(app, text):
 def drawToolbar(app):
     toolbarX = 0
     toolbarWidth = 58
-    toolbarTop = 22
-    buttonHeight = 70
-    gap = 8
+    toolbarTop = 50
+    buttonHeight = 55
+    gap = 6
     toolbarHeight = gap + 3* (buttonHeight + gap)
     
-    drawRect(toolbarX, toolbarTop, toolbarWidth, toolbarHeight, fill = rgb(40,40,40))
+    darkGray = rgb(240, 240, 240)
+    drawRect(toolbarX, toolbarTop, toolbarWidth, toolbarHeight, fill = darkGray, opacity = 80)
+    drawRect(toolbarX, toolbarTop, toolbarWidth, toolbarHeight,
+         fill=darkGray, border=rgb(210,210,210))
+    highlightLight = rgb(250, 230,150 )
+    highlightDark = rgb(224, 199, 105)
 
+    noteLight = rgb(180, 200, 230)
+    noteDark = rgb(140, 165, 200)
+    #I asked AI to find rgb values for slightly darker ver of colors above 
+    bookmarkLight = rgb(240, 180, 190)
+    bookmarkDark = rgb(210, 140, 150)
     tools = [
-        ('🖊','Highlight', 'activeHighlight', rgb(225, 220, 50), rgb(180,150,10)),
-        ('📝','Note', 'activeNote', rgb(100, 160, 255), rgb(50,100,200)),
-        ('🔖','Bookmark', 'activeBookmark', rgb(210, 100, 70),  rgb(150,50,30))
+        ('highlight.jpg','Highlight', 'activeHighlight', highlightLight, highlightDark),
+        ('note.jpg','Note', 'activeNote', noteLight, noteDark),
+        ('bookmark.jpg','Bookmark', 'activeBookmark', bookmarkLight,  bookmarkDark)
     ]
 
     for i, (icon, label, flag, onColor, pressedColor) in enumerate(tools):
@@ -704,21 +741,18 @@ def drawToolbar(app):
             isActive = app.activeBookmark
         color = pressedColor if isActive else onColor
         drawRect(toolbarX + 4, y, toolbarWidth - 8, buttonHeight, fill = color)
-        drawLabel(icon, toolbarX + toolbarWidth//2, y + buttonHeight//2 - 10, size = 16)
-        drawLabel(label, toolbarX + toolbarWidth//2, y + buttonHeight//2 + 12, size = 8, fill='white')
 
+        iconSize = 55
+        drawImage(icon, toolbarX + toolbarWidth//2, y + buttonHeight//2,
+                width=iconSize, height=iconSize, align='center')
+            
 def onMouseMove(app, mouseX, mouseY):
     app.cursorX = mouseX
     app.cursorY = mouseY
     for button in app.buttons:
         button.handleHover(mouseX, mouseY)
 
-    bx1 = app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX - 17
-    bx2 = app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX
-    by1 = app.displayScreenTop + app.displayScreenOffsetY
-    by2 = by1 + 12
-    app.burgerHovered = (bx1 <= mouseX <= bx2 and by1 <= mouseY <= by2)
-    #BOUND MOUSE MOTIONif app.cursorY
+
     
 def loadBook(filename):
     with open(f'{filename}', 'r', encoding = 'utf-8') as f:
@@ -784,7 +818,7 @@ def drawDefaultScreen(app):
 
 def drawBurgerMenu(app):
     menuX = app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX - app.menuWidth
-    menuTop = app.displayScreenTop + app.displayScreenOffsetY + app.burgerAndMenuOffset
+    menuTop = app.menuTop
     menuURL = 'menu.png'
     imageWidth, imageHeight = getImageSize(menuURL)
     drawImage(menuURL, menuX - 30, menuTop, width=imageWidth//1.5, height=imageHeight//2)
@@ -848,7 +882,7 @@ def drawAnnotationsPanel(app):
 
     drawRect(panelX, panelTop, panelWidth, panelHeight, fill = rgb(20, 20, 40), opacity = 95)
     drawLabel('Bookmarks & Notes', panelX + panelWidth // 2, panelTop + 18,
-                fill = 'white', size = 11, bold = True)
+                fill = rgb(50,50,50), size = 11, bold = True)
     drawLine(panelX, panelTop + 32, panelX + panelWidth, panelTop + 32, fill = rgb(80,80,80))
 
     lineHeight = 28
@@ -924,7 +958,7 @@ def handleAnnotationsPanelClick(app, mouseX, mouseY):
 
     for i, (icon, pageKey, label) in enumerate(visibleEntries):
         entryY = panelTop + 44 + i * lineHeight
-        if entryY <= mouseY <= entryY + lineHeight:
+        if entryY <= mouseY <= entryY + lineHeight:  
                 if deleteX <= mouseX <= panelX + panelWidth:
                     if icon == '🟡':
                         newRanges = []
@@ -951,6 +985,7 @@ def handleAnnotationsPanelClick(app, mouseX, mouseY):
                     app.pageIndex = pageKey
                     app.showNotesPanel = False
                     savePageChangeOnKeyPress(app)
+                return
 
 
 class Button:
@@ -960,6 +995,7 @@ class Button:
         self.width = width
         self.height = height
         self.text = text
+        self.image = kwargs.get('image', None)
         self.onClickFunction = onClickFunction
 
         # Optional styling via **kwargs with sensible defaults
@@ -993,21 +1029,21 @@ class Button:
     def handleHover(self, mouseX, mouseY):
         self.isHovered = self.visible and self.contains(mouseX, mouseY)
 
-    # ── drawing ───────────────────────────────────────────────────
+    # AI used to help debug draw function so aspects done by AI for adjustments
     def draw(self):
-        if not self.visible:
-            return
-        fill = self.hoverColor if self.isHovered else self.color
-
-        drawRect(self.left, self.top, self.width, self.height,
-                 fill=fill,
-                 border=self.borderColor,
-                 borderWidth=self.borderWidth)
-
-        drawLabel(self.text, self.centerX, self.centerY,
-                  fill=self.textColor,
-                  size=self.fontSize,
-                  bold=self.bold)
+        if self.image is not None:
+            drawImage(self.image, self.centerX, self.centerY,
+                    width=self.height * 0.8,
+                    height=self.height * 0.8,
+                    align='center')
+        else:
+            drawRect(self.left, self.top, self.width, self.height,
+                    fill=self.hoverColor if self.isHovered else self.color)
+            
+            drawLabel(self.text, self.centerX, self.centerY,
+                    fill=self.textColor,
+                    size=self.fontSize,
+                    bold=self.bold)
 
     # ── compatibility with your existing code ─────────────────────
     def intersect(self, x, y):   return self.contains(x, y)
@@ -1084,7 +1120,9 @@ class Books:
                 barW = imageWidth // 2.5
                 progress = book.currPage / book.totalPages
                 drawRect(book.left - barW//2, book.top + 55, barW, 5, fill = rgb(200,200,200))
-                drawRect(book.left - barW//2, book.top + 55, int(barW * progress), 5, fill = rgb(100,180,140))
+                progressWidth = int(barW * progress)
+                if progressWidth > 0:
+                    drawRect(book.left - barW//2, book.top + 55, int(barW * progress), 5, fill = rgb(100,180,140))
     
     def intersect(self, x, y):
         imageWidth, imageHeight = getImageSize(self.coverImage)
