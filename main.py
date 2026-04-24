@@ -4,15 +4,18 @@ import mediapipe as mp
 import threading
 import time
 from collections import deque
-
-# Put this near the top of main.py
 global_latest_hand_result = None
 
+#this function completely ai written EXEMPT
 def _gestureCallback(result, output_image, timestamp_ms):
     global global_latest_hand_result
     global_latest_hand_result = result
 
 def onAppStart(app):
+
+    app.pageIndex = 0
+    app.pages = []
+    app.totalPages = 0
     app.height = 890
     app.width = 680
     app.readingScreen = False
@@ -30,9 +33,6 @@ def onAppStart(app):
     app.numshelves = 3
     app.numBooksPerShelf = 5
     app.bookSpaceX = 125
-
-    app.gestureModel = GestureModel()
-    app.gestureController = GestureController(app.gestureModel)
     app.usingCamera = False
 
     app.fontSize = 14
@@ -80,10 +80,12 @@ def onAppStart(app):
     app.bookBoxHeight = app.height - 80
     app.margin = 30
 
-    makeButtons(app)
-    makeBooks(app)
+    
     app.gestureModel = GestureModel()
     app.gestureController = GestureController(app.gestureModel)
+
+    makeButtons(app)
+    makeBooks(app)
     loadAllProgress(app)
 
 
@@ -142,22 +144,20 @@ def loadAllProgress(app):
 #AI for using gesture model
 def onStep(app):
     global global_latest_hand_result
+    with app.gestureModel.lock:
+        if (app.usingCamera and global_latest_hand_result is not None
+        and global_latest_hand_result.hand_landmarks):
+            app.gestureModel.latestLandmark = global_latest_hand_result.hand_landmarks[0]
+        else:
+            app.gestureModel.latestLandmark = None
+            
     
-    # Check if the MediaPipe thread handed us a new result
-    if global_latest_hand_result is not None:
-        with app.gestureModel.lock:
-            app.gestureModel.latestLandmark = (
-                global_latest_hand_result.hand_landmarks[0]
-                if global_latest_hand_result.hand_landmarks
-                else None
-            )
-        
-        # Reset the global variable so we don't process the same frame twice
-        global_latest_hand_result = None
+    # Reset the global variable so we don't process the same frame twice
+    global_latest_hand_result = None
 
 
     if app.usingCamera and app.gestureModel is not None:
-        app.gestureModel.processLatestLandmark()
+        app.gestureModel.processLatestLandmark(app)
         app.cursorX = app.gestureModel.fingerScreenX
         app.cursorY = app.gestureModel.fingerScreenY
         
@@ -198,31 +198,32 @@ def makeCurrentBook(app, book):
     app.highlights = app.allHighlights[title]
     app.notes = app.allNotes[title]
 
+    app.lineHeight = int(app.fontSize * 1.35)
+    app.fileName =  book.getURL()
+    rawText = loadBook(app.fileName)
+    print(f'loaded: {app.fileName}, length: {len(rawText)}')  # add this
 
+    charsPerLine = int((app.width - 2 * app.margin) // (app.fontSize * 0.55))
+    linesPerPage = int((app.height - 120) // app.lineHeight)
+    app.charsPerPage = int(charsPerLine * linesPerPage)
 
-        app.lineHeight = int(app.fontSize * 1.35)
-        app.fileName =  book.getURL()
-        rawText = loadBook(app.fileName)
-        print(f'loaded: {app.fileName}, length: {len(rawText)}')  # add this
+    app.pages = makePages(rawText, app.charsPerPage)
+    app.totalPages = len(app.pages)
+    book.totalPages = app.totalPages
 
-        charsPerLine = int((app.width - 2 * app.margin) // (app.fontSize * 0.55))
-        linesPerPage = int((app.height - 120) // app.lineHeight)
-        app.charsPerPage = int(charsPerLine * linesPerPage)
+    app.pageIndex = book.currPage
 
-        app.pages = makePages(rawText, app.charsPerPage)
-        app.totalPages = len(app.pages)
-        book.totalPages = app.totalPages
-
-        app.pageIndex = book.currPage
-
-        #when you reopen book pages are reclaulcated and may have elss or more pages,
-        #so saved index may be out of range
+    #when you reopen book pages are reclaulcated and may have elss or more pages,
+    #so saved index may be out of range
+    if app.totalPages == 0:
+        app.pageIndex = 0
+    else:
         app.pageIndex = min(app.pageIndex, app.totalPages - 1)
         app.pageIndex = max(app.pageIndex, 0)
 
-        app.chapters = extractChapters(app.pages)
-        app.showChapterPanel = False
-        app.chapterScroll = 0
+    app.chapters = extractChapters(app.pages)
+    app.showChapterPanel = False
+    app.chapterScroll = 0
 
 
 def makeBooks(app):
@@ -307,7 +308,7 @@ def makeButtons(app):
 def onKeyPress(app, key):
 
     if app.showNotePopup:
-        if key == 'center':
+        if key == 'enter':
             pageKey = app.pageIndex
             app.notes[pageKey] = app.notePopupText
             app.allNotes[app.currentRead.title] = app.notes
@@ -319,7 +320,7 @@ def onKeyPress(app, key):
             app.showNotePopup = False
             app.notePopupText = ''
         elif key == 'backspace':
-            app.notePopupText = app.notePopupText[:-1]1
+            app.notePopupText = app.notePopupText[:-1]
         elif len(key) == 1:
             app.notePopupText += key
         return None
@@ -354,7 +355,9 @@ def onKeyPress(app, key):
                 maxScroll = max(0, len(app.chapters) - 10)
                 app.chapterScroll = min(maxScroll, app.chapterScroll + 1)
             elif app.showNotesPanel:
-                totalEntries = len(app.currentRead.bookmarks) + len(app.highlights) + len(app.notes)
+                totalEntries = len(app.currentRead.bookmarks) + len(app.notes)
+                for pageKey in app.highlights:
+                    totalEntries += len(app.highlights[pageKey])
                 app.notesScroll = min(max(0, totalEntries - 10), app.notesScroll + 1)
         
         elif key == '=':
@@ -461,8 +464,7 @@ def getBookPressed(app, mouseX, mouseY):
     return None
 
 def redrawAll(app):
-    if app.showNotePopup:
-        drawNotePopup(app)
+    
     if app.defaultScreen:
         drawDefaultScreen(app)
         drawHamburgerButton(app)
@@ -470,15 +472,18 @@ def redrawAll(app):
     if app.readingScreen:
         drawBook(app)
         drawHamburgerButton(app)
-        app.useFinger.drawButton()
+        app.useFinger.draw()
         
     if app.libraryScreen:
         drawLibraryScreen(app)
         drawHamburgerButton(app)
-    #cursor for tracking mediapipe --> drawCircle(app.cursorX, app.cursorY, 10, fill='darkBlue')
+
     if app.burgerHovered:
         drawBurgerMenu(app)
         drawHamburgerButton(app)
+
+    if app.showNotePopup:
+        drawNotePopup(app)
 
 def extractChapters(pages):
     chapters = []
@@ -507,8 +512,22 @@ def looksLikeChapterHeading(line):
         return True
     return False
 
+def drawNotePopup(app):
+    width, height = 400, 200
+    cx, cy = app.width //2, app.height //2
+    drawRect(cx - width//2, cy - height//2, width, height, fill='white', border='black')
+    drawLabel("Write Note:", cx, cy - 70, size=16, bold=True)
+    drawLabel(app.notePopupText, cx, cy, size=12)
+    drawLabel("Press ENTER to save | ESC to cancel", cx, cy + 70, size=10, fill='gray')
+
+
+
 
 def drawBook(app):
+    if app.totalPages == 0:
+        drawLabel('No pages loaded', app.width //2, app.height //2,size=20 )
+        return None
+
 
     drawRect(app.bookBoxLeft, app.bookBoxTop, app.bookBoxWidth, app.bookBoxHeight, fill = 'ivory')
     pageText = app.pages[app.pageIndex]
@@ -908,7 +927,18 @@ def handleAnnotationsPanelClick(app, mouseX, mouseY):
         if entryY <= mouseY <= entryY + lineHeight:
                 if deleteX <= mouseX <= panelX + panelWidth:
                     if icon == '🟡':
-                        app.highlights = {k: v for k, v in app.highlights.items() if k != pageKey }
+                        newRanges = []
+                        removedOne = False
+                        for startChar, endChar in app.highlights[pageKey]:
+                            #used AI to get snippet code
+                            snippet = app.pages[pageKey][int(startChar):int(endChar)].replace('\n', ' ')
+                            if len(snippet) > 28:
+                                snippet = snippet[:28] + '...'
+                            if snippet == label and removedOne == False:
+                                removedOne = True
+                            else:
+                                newRanges.append((startChar, endChar))
+                        app.highlights[pageKey] = newRanges
                         app.allHighlights[app.currentRead.title] = app.highlights
                     elif icon == '📝':
                         app.notes = {k: v for k, v in app.notes.items() if k != pageKey }
@@ -1096,8 +1126,7 @@ class GestureModel:
         self.minVelocity = 250       # raise this — filters out slow drift
         self.swipeThreshold = 50     # larger distance required
 
-    def processLatestLandmark(self):
-        """Called by onStep on the Main Thread"""
+    def processLatestLandmark(self, app):
         with self.lock:
             landmark = self.latestLandmark
             if landmark is None: return
@@ -1108,8 +1137,8 @@ class GestureModel:
         currentTime = time.time()
 
                 # Update cursor (0.6/0.4 weighting for smoothness)
-        self.fingerScreenX = int(self.fingerScreenX * 0.85 + (tip.x * 680) * 0.15)
-        self.fingerScreenY = int(self.fingerScreenY * 0.85 + (tip.y * 890) * 0.15)
+        self.fingerScreenX = int(self.fingerScreenX * 0.85 + tip.x * app.width * 0.15)
+        self.fingerScreenY = int(self.fingerScreenY * 0.85 + tip.y * app.height * 0.15)
         
         # Update history for swipe math
         self.history.append((currentTime, currX, currY))
@@ -1143,7 +1172,7 @@ class GestureModel:
                 self.swipeDetected = True
                 self.lastSwipeTime = currentTime
                 # Clear history so the return motion isn't processed at all
-                self.history.clear()
+                self.history = deque(maxlen=10)
 
 class GestureController:
     def __init__(self, model):
@@ -1194,14 +1223,18 @@ class curvedRect:
         self.color=color
 
     def getCircleCoords(self):
-        return [(self.cX + 7, self.cY + 8),
-                (self.cX +7, self.cY + self.h - 8),
-                (self.cX + self.w - 7, self.h + self.cY - 8),
-                (self.cX + self.w - 7, self.cY + 8)]
+        left = self.cX - self.w // 2
+        right = self.cX + self.w // 2
+        bottom = self.cY + self.h // 2
+        top = self.cY - self.h // 2
+        return [(left + 7, top + 8),
+                (left + 7, bottom - 8),
+                (right - 7, bottom - 8),
+                (right - 7, top + 8)]
     def draw(self):
         drawRect(self.cX,self.cY,self.w,self.h,fill=self.color,align = 'center')
-        for x,y, r in getCircleCoords(self):
-            drawCircle(x, y, r, fill = self.color)
+        for x,y in self.getCircleCoords():
+            drawCircle(x, y, 7, fill = self.color)
         
     
 
