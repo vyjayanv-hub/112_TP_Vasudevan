@@ -8,3 +8,6 @@ Moby Dick; Or, The Whale|18|130|187
 The Great Gatsby|0|882|988
 The Great Gatsby|0|715|823
 The Scarlet Letter|0|478|692
+The Importance Of Being Earnest|26|142|298
+The Tale of Two Cities|7|973|1081
+Little Women|0|608|720

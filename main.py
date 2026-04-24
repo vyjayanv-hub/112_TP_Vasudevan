@@ -17,6 +17,9 @@ def onAppStart(app):
     app.pageIndex = 0
     app.pages = []
     app.totalPages = 0
+
+    app.fingerTurnCooldown = 0.7
+    app.lastFingerTurnTime = 0
     app.height = 890
     app.width = 680
     app.readingScreen = False
@@ -25,6 +28,8 @@ def onAppStart(app):
     app.books = []
     app.currentRead = None
     app.stepsPerSecond = 30
+    app.lastSwipeTime = 0
+    app.swipeCooldown = 0.5
 
     app.burgerHovered = False
 
@@ -46,7 +51,7 @@ def onAppStart(app):
     app.highlightStart = None
     app.showNotePopup = False
     app.notePopupText = ''
-    app.activeHighlight = False #checks if highlight mode is on
+    app.activeHighlight = False
     app.activeNote = False
     app.noteText = ''
     app.activeBookmark = False
@@ -85,15 +90,16 @@ def onAppStart(app):
 
     
     app.gestureModel = GestureModel()
+    app.gestureModel.app = app
     app.gestureController = GestureController(app.gestureModel)
+    app.gestureModel.fingerScreenX = app.width // 2
+    app.gestureModel.fingerScreenY = app.height // 2
 
     makeButtons(app)
     makeBooks(app)
     loadAllProgress(app)
 
 
-
-# Standalone functions (outside any class) - you already have these, keep them
 def saveAllProgress(app):
     with open('progress.txt', 'w') as progressFile:
         for book in app.books:
@@ -143,46 +149,53 @@ def loadAllProgress(app):
         pass
         
 
-###################################################
-#AI for using gesture model
+#AI for using most gesture aspecys and dealing with hand landkark
 def onStep(app):
     global global_latest_hand_result
-    with app.gestureModel.lock:
-        if (app.usingCamera and global_latest_hand_result is not None
-        and global_latest_hand_result.hand_landmarks):
-            app.gestureModel.latestLandmark = global_latest_hand_result.hand_landmarks[0]
-        else:
-            app.gestureModel.latestLandmark = None
-            
-    
-    # Reset the global variable so we don't process the same frame twice
-    global_latest_hand_result = None
 
+    if not app.usingCamera:
+        return
 
-    if app.usingCamera and app.gestureModel is not None:
-        app.gestureModel.processLatestLandmark(app)
-        app.cursorX = app.gestureModel.fingerScreenX
-        app.cursorY = app.gestureModel.fingerScreenY
-        
-        # 2. Only check for swipes if we are actively reading a book
-        if app.readingScreen and app.gestureModel.swipeDetected:
-            swipeDir = app.gestureModel.swipeDirection
-            app.gestureModel.swipeDetected = False # Reset immediately
-            
-            # Page flipping logic
-            if swipeDir == "LEFT" and app.pageIndex < app.totalPages - 1:
-                app.pageIndex += 1
-                savePageChangeOnKeyPress(app)
-            elif swipeDir == "RIGHT" and app.pageIndex > 0:
-                app.pageIndex -= 1
-                savePageChangeOnKeyPress(app)
-        
-        # 3. If a swipe happened on a non-reading screen, reset it so it 
-        # doesn't 'carry over' when the user eventually opens a book.
-        elif app.gestureModel.swipeDetected:
-            app.gestureModel.swipeDetected = False
-    # If not using camera, onMouseMove handles app.cursorX/Y automatically
-    
+    freshLandmark = None
+    if global_latest_hand_result is not None:
+        if global_latest_hand_result.multi_hand_landmarks:
+            freshLandmark = global_latest_hand_result.multi_hand_landmarks[0].landmark
+        global_latest_hand_result = None
+
+    app.gestureModel.processLatestLandmark(app, freshLandmark)
+
+    oldX = app.cursorX
+    app.cursorX = app.gestureModel.fingerScreenX
+    app.cursorY = app.gestureModel.fingerScreenY
+
+    if not app.readingScreen:
+        return
+
+    if app.showChapterPanel or app.showNotesPanel or app.showNotePopup:
+        return
+
+    if not hasattr(app, 'lastFingerX'):
+        app.lastFingerX = app.cursorX
+        app.lastSwipeTime = 0
+        return
+
+    dx = app.cursorX - app.lastFingerX
+    currentTime = time.time()
+
+    if currentTime - app.lastSwipeTime > 0.8:
+        if dx > 35 and app.pageIndex > 0:
+            app.pageIndex -= 1
+            savePageChangeOnKeyPress(app)
+            app.lastSwipeTime = currentTime
+            print("finger swipe right")
+
+        elif dx < -35 and app.pageIndex < app.totalPages - 1:
+            app.pageIndex += 1
+            savePageChangeOnKeyPress(app)
+            app.lastSwipeTime = currentTime
+            print("finger swipe left")
+
+    app.lastFingerX = app.cursorX
 
 #some ai for loadbook and makepages for loading pages
 def makeCurrentBook(app, book):
@@ -204,8 +217,6 @@ def makeCurrentBook(app, book):
     app.lineHeight = int(app.fontSize * 1.35)
     app.fileName =  book.getURL()
     rawText = loadBook(app.fileName)
-    print(f'loaded: {app.fileName}, length: {len(rawText)}')  # add this
-
     charsPerLine = int((app.width - 2 * app.margin) // (app.fontSize * 0.55))
     linesPerPage = int((app.height - 120) // app.lineHeight)
     app.charsPerPage = int(charsPerLine * linesPerPage)
@@ -272,8 +283,12 @@ def makeButtons(app):
         if app.usingCamera:
             app.usingCamera = False
             app.gestureController.isRunning = False
+            app.gestureModel.history.clear()
         else:
             app.usingCamera = True
+            app.gestureModel = GestureModel()
+            app.gestureModel.app = app
+            app.gestureController = GestureController(app.gestureModel)
             app.gestureController.start()
 
     bottomRow = makeButtonRow(
@@ -299,7 +314,7 @@ def makeButtons(app):
     menuX   = app.displayScreenLeft + app.displayScreenWidth - app.displayScreenOffsetX - app.menuWidth
     spacing = 43
     menuLabels = ['Library', 'Continue']
-    menuFunctions    = [goLibrary, goContinue]   # settings = TODO
+    menuFunctions    = [goLibrary, goContinue]   
 
     app.menuButtons = []
     for i, (label, function) in enumerate(zip(menuLabels, menuFunctions)):
@@ -322,7 +337,7 @@ def onKeyPress(app, key):
 
             app.showNotePopup = False
             app.notePopupText = ''
-        elif key == 'return':
+        elif key == 'escape':
             app.showNotePopup = False
             app.notePopupText = ''
         elif key == 'delete':
@@ -331,7 +346,7 @@ def onKeyPress(app, key):
             app.notePopupText += ' '
         elif len(key) == 1:
             app.notePopupText += key
-        return None
+        return 
     if app.readingScreen:
         if key == 'right' and app.pageIndex < app.totalPages - 1:
             app.pageIndex += 1
@@ -341,6 +356,7 @@ def onKeyPress(app, key):
             savePageChangeOnKeyPress(app)
         elif key == 'c':
             app.showChapterPanel = not app.showChapterPanel
+            app.showNotesPanel = False
         elif key == 'n':
             app.showNotesPanel = not app.showNotesPanel
             app.showChapterPanel = False 
@@ -407,12 +423,16 @@ def onMousePress(app, mouseX, mouseY):
     for button in app.buttons:
         button.handleClick(mouseX, mouseY)
     if app.readingScreen:
-        handleToolbarClick(app, mouseX, mouseY)
-        handlePageclick(app, mouseX, mouseY)
+        
         if app.showNotesPanel:
             handleAnnotationsPanelClick(app, mouseX, mouseY)
+            return
         if app.showChapterPanel:
             handleChapterPanelClick(app, mouseX, mouseY)
+            return
+
+        handleToolbarClick(app, mouseX, mouseY)
+        handlePageclick(app, mouseX, mouseY)
     if app.libraryScreen:
         currRead = getBookPressed(app, mouseX, mouseY)
         if currRead is not None:
@@ -431,8 +451,8 @@ def onMousePress(app, mouseX, mouseY):
 
 #this function is entirely AI written bcs i wanted functionality but ran out of time to write it
 def handleChapterPanelClick(app, mouseX, mouseY):
-    panelWidth = 165
-    panelX = app.bookBoxLeft + app.bookBoxWidth - panelWidth - 10
+    panelWidth = 195
+    panelX = app.bookBoxLeft + app.bookBoxWidth - panelWidth
     panelTop = app.bookBoxTop + 20
     panelHeight = app.bookBoxHeight - 70
     lineHeight = 30
@@ -442,10 +462,10 @@ def handleChapterPanelClick(app, mouseX, mouseY):
         return
 
     startY = panelTop + 48
-    clickedIndex = (mouseY - startY) // lineHeight + app.chapterScroll
+    clickedIndex = int((mouseY - startY) // lineHeight) + app.chapterScroll
 
     if 0 <= clickedIndex < len(app.chapters):
-        chapterName, pageIndex = app.chapters[int(clickedIndex)]
+        chapterName, pageIndex = app.chapters[clickedIndex]
         app.pageIndex = pageIndex
         app.showChapterPanel = False
         savePageChangeOnKeyPress(app)
@@ -614,11 +634,16 @@ def drawBook(app):
         drawLabel('Highlight mode ON',app.width//2, 55, size=12, bold=True, fill=rgb(90,90,90))
     elif app.activeBookmark:
         drawLabel('Bookmark mode ON',app.width//2, 55, size=12, bold=True, fill=rgb(90,90,90))
+    if app.usingCamera:
+        drawLabel('Finger ON', app.width - 90, 65, size=14, fill='green', bold=True)
+    else:
+        drawLabel('Finger OFF', app.width - 90, 65, size=14, fill='red', bold=True)
 
-    if app.showChapterPanel:
-        drawChapterPanel(app)
     if app.showNotesPanel:
         drawAnnotationsPanel(app)
+    if app.showChapterPanel:
+        drawChapterPanel(app)
+    
 
     drawToolbar(app)
     
@@ -1110,7 +1135,6 @@ class Books:
 
     def __init__(self, index, app, title, author, imageURL, URL):
         self.shelf = index // app.numBooksPerShelf
-        # A book is arranged in a certain order on a shelf based on its index
         self.orderInShelf = index % app.numBooksPerShelf
         shelfStartX = 100
         self.left = shelfStartX + self.orderInShelf * app.bookSpaceX
@@ -1118,8 +1142,6 @@ class Books:
         imageWidth, imageHeight = getImageSize(imageURL)
         bookIconHeight = imageHeight // 2.8
         self.top = shelfYValues[self.shelf] - bookIconHeight/2
-
-        # A book is on shelf 1,2, or 3 based on its index in app.books
         
         self.title = title
         self.URL = URL
@@ -1182,91 +1204,72 @@ class Books:
     
     def __eq__(self, other):
         return isinstance(other, Books) and ((self.title, self.author) == (other.title, other.author))
-#almost fully integrated gestures classes with AI below but with some self integrated editing:
+#almost fully integrated gestures classes (2) with AI below but with some self integrated editing EXEMPT:
 class GestureModel:
     def __init__(self):
-        # Thread safety
+        self.lastKnownX = 0
+        self.lastKnownY = 0
         self.lock = threading.Lock()
         
-        # Data shared with the background thread
         self.latestLandmark = None
         
-        # Public variables for the UI and cursor
         self.swipeDirection = None
         self.swipeDetected = False
         self.fingerScreenX = 200
         self.fingerScreenY = 200
         
-        # Swipe detection settings
         self.history = deque()
         self.lastSwipeTime = 0
 
-                # In GestureModel.__init__, change these values:
-        self.timeWindow = 0.25       # slightly tighter window
-        self.coolDownTime = 1.2      # longer cooldown kills the back-swipe
-        self.minVelocity = 250       # raise this — filters out slow drift
-        self.swipeThreshold = 50     # larger distance required
+        self.timeWindow       = 0.6
+        self.coolDownTime     = 1.2
+        self.maxVerticalDrift = 400
+        self.swipeThreshold   = 45
 
-    def processLatestLandmark(self, app):
-        with self.lock:
-            landmark = self.latestLandmark
-            if landmark is None: return
-        
-        # Index finger tip is landmark index 8
-        tip = landmark[8]
-        currX, currY = tip.x * 640, tip.y * 480
+    
+    #AI Exempt
+    def processLatestLandmark(self, app, freshLandmark):
+        if freshLandmark is None:
+            return
         currentTime = time.time()
 
-                # Update cursor (0.6/0.4 weighting for smoothness)
-        self.fingerScreenX = int(self.fingerScreenX * 0.85 + tip.x * app.width * 0.15)
-        self.fingerScreenY = int(self.fingerScreenY * 0.85 + tip.y * app.height * 0.15)
-        
-        # Update history for swipe math
-        self.history.append((currentTime, currX, currY))
-        while self.history and (currentTime - self.history[0][0] > self.timeWindow):
-            self.history.popleft()
-            
-        # Only detect swipes if we are outside the cooldown period
-        if currentTime - self.lastSwipeTime > self.coolDownTime:
-            self.detectSwipe(currentTime)
+        if freshLandmark is not None:
+            tip = freshLandmark[8]
+            self.lastKnownX = tip.x * app.width
+            self.lastKnownY = tip.y * app.height
+            self.fingerScreenX = int(self.fingerScreenX * 0.75 + self.lastKnownX * 0.25)
+            self.fingerScreenY = int(self.fingerScreenY * 0.75 + self.lastKnownY * 0.25)
+            self.history.append((currentTime, self.lastKnownX, self.lastKnownY))
+            while self.history and (currentTime - self.history[0][0] > self.timeWindow):
+                self.history.popleft()
 
+    
     def detectSwipe(self, currentTime):
-        if len(self.history) < 5: return
-        
-        startTime, startX, startY = self.history[0]
-        endTime, endX, endY = self.history[-1]
-        
-        deltaTime = endTime - startTime
-        if deltaTime <= 0: return
-        
-        diffX = endX - startX
-        diffY = endY - startY
-        
-        velocity = (diffX**2 + diffY**2)**0.5 / deltaTime
-        
-        if velocity > self.minVelocity:
-            # Check if it is primarily horizontal and meets distance threshold
-            if abs(diffX) > abs(diffY) and abs(diffX) > self.swipeThreshold:
-                self.swipeDirection = "LEFT" if diffX < 0 else "RIGHT"
-                self.swipeDetected = True
-                self.lastSwipeTime = currentTime
-                # Clear history so the return motion isn't processed at all
-                self.history = deque(maxlen=10)
+        if len(self.history) < 2:
+            return
+
+        oldTime, oldX, oldY = self.history[0]
+        newTime, newX, newY = self.history[-1]
+
+        dx = newX - oldX
+        dy = newY - oldY
+
+        if abs(dx) > self.swipeThreshold and abs(dy) < self.maxVerticalDrift:
+            if dx > 0:
+                self.swipeDirection = 'right'
+            else:
+                self.swipeDirection = 'left'
+
+            self.swipeDetected = True
+            self.lastSwipeTime = currentTime
+            self.history.clear()
+
 
 class GestureController:
     def __init__(self, model):
         self.model = model
+        self.app = None
         self.isRunning = False
-        self.timestamp = 0
-        baseOptions = mp.tasks.BaseOptions
-        self.options = mp.tasks.vision.HandLandmarkerOptions(
-            base_options=baseOptions(model_asset_path='hand_landmarker.task'),
-            running_mode=mp.tasks.vision.RunningMode.LIVE_STREAM,
-            num_hands=1,
-            min_hand_detection_confidence=0.6,
-            min_tracking_confidence=0.6,
-            result_callback=_gestureCallback
-        )
 
     def start(self):
         if not self.isRunning:
@@ -1274,24 +1277,30 @@ class GestureController:
             threading.Thread(target=self.captureLoop, daemon=True).start()
 
     def captureLoop(self):
-        camera = cv2.VideoCapture(0)
-        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        try:
-            handLandmarker = mp.tasks.vision.HandLandmarker
-            with handLandmarker.create_from_options(self.options) as landmarker:
-                while self.isRunning and camera.isOpened():
-                    success, frame = camera.read()
-                    if not success: continue
-                    frame = cv2.flip(frame, 1)
-                    rgbFrame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    mpImage = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgbFrame)
-                    self.timestamp += 1
-                    landmarker.detect_async(mpImage, self.timestamp)
-                    time.sleep(0.01)
-        finally:
-            camera.release()
+        global global_latest_hand_result
 
+        camera = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
+        print("Camera opened:", camera.isOpened())
+
+        hands = mp.solutions.hands.Hands(
+            max_num_hands=1,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+
+        while self.isRunning:
+            success, frame = camera.read()
+            if not success:
+                continue
+
+            frame = cv2.flip(frame, 1)
+            rgbFrame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            result = hands.process(rgbFrame)
+
+            global_latest_hand_result = result
+
+        camera.release()
+        hands.close()
 
 class curvedRect:
     def __init__(self, app,cX,cY, width, height, color):
