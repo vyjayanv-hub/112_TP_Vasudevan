@@ -180,7 +180,6 @@ def onStep(app):
     # If not using camera, onMouseMove handles app.cursorX/Y automatically
     
 def readingScreen(app):
-    #make pages or smth
     drawRect(app.width//3, 0, app.width//3, app.height, fill = 'salmon')
     
 
@@ -364,6 +363,8 @@ def onMousePress(app, mouseX, mouseY):
     if app.readingScreen:
         handleToolbarClick(app, mouseX, mouseY)
         handlePageclick(app, mouseX, mouseY)
+        if app.showNotesPanel:
+            handleAnnotationsPanelClick(app, mouseX, mouseY)
     if app.libraryScreen:
         currRead = getBookPressed(app, mouseX, mouseY)
         if currRead is not None:
@@ -625,7 +626,7 @@ def drawWrappedText(app, text):
     centerX = left + maxWidth // 2
     charsPerLine = int(maxWidth / (app.fontSize * 0.55))
     y = app.bookBoxTop + 45
-    drawHighlightRanges(app.text)
+    drawHighlight(app,text)
     if app.pageIndex in app.notes:
         drawLabel('📝', app.bookBoxLeft + 12, app.bookBoxTop + 12, size=13)
 
@@ -818,13 +819,21 @@ def drawAnnotationsPanel(app):
     y = panelTop + 44
     scroll = app.notesScroll
     allEntries = []
+    for pageKey, rangeList in app.highlightsitems():
+        for startChar, endChar in rangeList:
+            if pageKey < len(app.pages):
+                snippet = app.pages[pageKey][startChar:endChar]
+                snippet = snippet.replace('\n', ' ')
+                if len(snippet) > 28:
+                    snippet = snippet[:28] + '...'
+                allEntries.append(('🟡', pageKey, snippet))
+    
+    for pageKey, noteText in app.notes.items():
+        preview = noteTExt[:28] + '...' if len(noteText) > 28 else noteText:
+        allEntries.append(('📝', pageKey, preview))
     
     for pageNum in app.currentRead.bookmarks:
         allEntries.append(('🔖', pageNum, f'Bookmark p.{pageNum + 1}'))
-    for pageNum in app.highlights:
-        allEntries.append(('🟡', pageNum, f'Highlight p.{pageNum + 1}'))
-    for pageNum in app.notes:
-        allEntries.append(('📝', pageNum, f'Note p.{pageNum + 1}'))
 
     allEntries.sort(key = getEntryPage)
     maxVisible = (panelHeight - 60) // lineHeight
@@ -837,12 +846,65 @@ def drawAnnotationsPanel(app):
     
         for icon, pageNum, label in visibleEntries:
             drawLabel(icon + ' ' + label, panelX + 8, y, align = 'left', size = 10, fill = 'white')
+            drawLabel('x', panelX + panelWidth - 12, y, align = 'left', size = 11, fill = rgb(180, 80, 80))
             y += lineHeight
     
     if scroll > 0:
         drawLabel('▲', panelX + panelWidth//2, panelTop + 38, fill = rgb(150,150,150), size = 10)
     if scroll + maxVisible < len(allEntries):
         drawLabel('▼', panelX + panelWidth//2, panelTop + panelHeight - 10, fill = rgb(150,150,150), size=10)
+
+
+def handleAnnotationsPanelClick(app, mouseX, mouseY):
+    panelWidth = 195
+    panelX = app.bookBoxLeft + app.bookBoxWidth - panelWidth
+    panelTop = app.bookBoxTop
+    panelHeight = app.bookBoxHeight
+    lineHeight = 28
+    scroll = app.notesScroll
+    maxVisible = (panelHeight - 60) // lineHeight
+
+    if not (panelX <= mouseX <= panelX + panelWidth):
+        return None
+    
+    allEntries = []
+    for pageNum in app.currentRead.bookmarks:
+        allEntries.append(('🔖', pageNum, f'Bookmark p.{pageNum + 1}'))
+    for pageKey, rangeList in app.allHighlights.items():
+        for startChar, endChar in rangeList:
+            if pageKey < len(app. pages):
+                snippet = app.pages[pageKey][startChar:endChar].replace('\n', ' ')
+                if len(snippet) > 28:
+                    snippet = snippet[:28] + '...'
+                allEntries.append(('🟡', pageKey, snippet))
+    for pageKey, noteText in app.notes.items():
+        preview = noteText[:28] + '...' if len(noteText) > 28 else noteText
+        allEntries.append(('📝', pageKey, preview))
+    
+    allEntries.sort(key = getEntryPage)
+    visibleEntries = allEntries[scroll: scroll + maxVisible]
+
+    deleteX = panelX + panelWidth - 20
+
+    for i, (icon, pageKey, label) in enumerate(visibleEntries):
+        entryY = panelTop + 44 + i * lineHeight
+        if entryY <= mouseY <= entryY + lineHeight:
+            if deleteX <= moouseX <= entryY + lineHeight:
+                if deleteX <= mouseX <= panelX + panelWidth:
+                    if icon == '🟡':
+                        app.highlights = {k: v for k, v in app.highlights.items() if k != pageKey }
+                        app.allHighlights[app.currentRead.title] = app.highlights
+                    elif icon == '📝':
+                        app.notes = {k: v for k, v in app.notes.items() if k != pageKey }
+                        app.allNotes[app.currentRead.title] = app.notes
+                    elif icon == '🔖':
+                        if pageKey in app.currentRead.bookmarks:
+                            app.currentRead.bookmarks.remove(pageKey)
+                    saveAllProgress(app)
+                else:
+                    app.pageIndex = pageKey
+                    app.showNotesPanel = False
+                    savePageChangeOnKeyPress(app)
 
 
 class Button:
