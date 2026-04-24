@@ -35,6 +35,9 @@ def onAppStart(app):
 
     app.fontSize = 14
 
+
+    app.allHighlights = {}
+    app.allNotes = {}
     app.notes = {}
     app.highlights = {}
     app.highlightStart = None
@@ -151,6 +154,16 @@ def makeCurrentBook(app, book):
         app.bookBoxWidth = app.displayScreenWidth
         app.bookBoxHeight = app.height - 160
         app.currentRead = book
+        title = book.title
+        if title not in app.allHighlights:
+            app.allHighlights[title] = dict()
+        if title not in app.allNotes:
+            app.allNotes[title] = dict()
+        app.highlights = app.allHighlights[title]
+        app.notes = app.allNotes[title]
+
+
+
         app.lineHeight = int(app.fontSize * 1.35)
         app.fileName =  book.getURL()
         rawText = loadBook(app.fileName)
