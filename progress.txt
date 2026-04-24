@@ -1,15 +1,15 @@
 BOOK|The Importance Of Being Earnest|0|
 BOOK|Little Women|0|
-BOOK|The Great Gatsby|0|
-BOOK|The Scarlet Letter|0|
+BOOK|The Great Gatsby|5|0
+BOOK|The Scarlet Letter|0|12,0
 BOOK|The Tale of Two Cities|0|
 BOOK|Frankenstein|0|
-BOOK|The Phantom of the Opera|0|
+BOOK|The Phantom of the Opera|3|0
 BOOK|Great Expectations|3|0,1
-BOOK|Autobiography of Benjamin Franklin|7|
+BOOK|Autobiography of Benjamin Franklin|96|15
 BOOK|The Brothers Karamazov|0|
 BOOK|The Count of Monte Cristo|0|
 BOOK|Moby Dick; Or, The Whale|18|
-BOOK|Romeo and Juliet|0|
+BOOK|Romeo and Juliet|0|0
 BOOK|Pride and Prejudice|0|
 BOOK|Dracula|0|

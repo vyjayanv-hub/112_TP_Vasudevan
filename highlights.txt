@@ -3,3 +3,8 @@ Great Expectations|1|474|582
 Great Expectations|3|1127|1182
 Great Expectations|3|1295|1405
 Great Expectations|3|1610|1838
+Moby Dick; Or, The Whale|18|606|720
+Moby Dick; Or, The Whale|18|130|187
+The Great Gatsby|0|882|988
+The Great Gatsby|0|715|823
+The Scarlet Letter|0|478|692
