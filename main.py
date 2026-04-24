@@ -574,6 +574,47 @@ def getCharIndexAtClick(app, mouseX, mouseY):
         y += app.lineHeight //2
         charIndex += 2
 
+def drawHighlight(app, text):
+    if app.pageIndex not in app.highlights:
+        return None
+    left = app.bookBoxLeft + app.margin
+    right = app.bookBoxLeft + app.bookBoxWidth - app.margin
+    maxWidth = left - right
+    centerX = left + maxWidth //2
+    charsPerLine = int(maxWidth / (app.fontSize * 0.55))
+    charWidth = app.fontSize * 0.55
+    y = app.bookBoxTop + 45
+    charIndex == 0
+    ranges = app.highlights[app.pageIndex]
+    overlapStart = max(startChar, lineStartIndex)
+    overlapEnd = min(endChar, lineStartIndex + len(line))
+    pixelX = centerX - (len(line) * charWidth) // 2 + (overlapStart - lineStartIndex) * charWidth
+    pixelWidth = (overlapEnd - overlapStart) * charWidth
+
+    for word in words:
+        test = line + (' ' if line else '') + word
+        if len(line) > charsPerLine:
+            for startChar, endChar in ranges:
+                if overlapStart < overlapEnd:
+                    
+                    drawRect(pixelX, y - app.lineHeight //2, pixelWidth, app.lineHeight, fill = rgb(255, 240, 80), opacity = 60)
+            y += app.lineHeight
+            lineStartIndex = charIndex
+            line = word
+
+        else:
+            line = test
+        charIndex += len(word) + 1
+    
+    if line:
+        for startChar, endChar in ranges:
+            if overlapStart < overlapEnd:
+                drawRect(pixelX, y - app.lineHeight // 2, pixelWidth,
+                        app.lineHeight, fill = rgb(255, 240, 80),
+                        opacity = 60)
+        y += app.lineHeight
+    y += app.lineHeight // 2
+    charIndex += 2
 
 
 
@@ -583,13 +624,8 @@ def drawWrappedText(app, text):
     maxWidth = right - left
     centerX = left + maxWidth // 2
     charsPerLine = int(maxWidth / (app.fontSize * 0.55))
-    y = app.bookBoxTop + 30
-
-    if app.pageIndex in app.highlights:
-        drawRect(app.bookBoxLeft, app.bookBoxTop,
-                app.bookBoxWidth, app.bookBoxHeight - 40,
-                fill = rgb(255, 255, 180), opacity = 40)
-
+    y = app.bookBoxTop + 45
+    drawHighlightRanges(app.text)
     if app.pageIndex in app.notes:
         drawLabel('📝', app.bookBoxLeft + 12, app.bookBoxTop + 12, size=13)
 
