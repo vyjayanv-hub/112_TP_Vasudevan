@@ -11,7 +11,6 @@ def _gestureCallback(result, output_image, timestamp_ms):
     global_latest_hand_result = result
 
 def onAppStart(app):
-    
 
     app.pageIndex = 0
     app.pages = []
@@ -27,8 +26,6 @@ def onAppStart(app):
     app.stepsPerSecond = 30
 
     app.burgerHovered = False
-
-
 
     app.bookSpaceY = 150
     app.numshelves = 3
@@ -929,18 +926,14 @@ def drawChapterPanel(app):
     for i, (name, pageIndex) in enumerate(app.chapters[scroll : scroll + maxVisible]):
         y = panelTop + 48 + i * lineHeight
         absIndex = i + scroll
-
         #AI help with highlighting chapter reader is currently in
         isCurrent = (
             pageIndex <= app.pageIndex and
             (absIndex + 1 >= len(app.chapters) or app.chapters[absIndex + 1][1] > app.pageIndex)
         )
-        
         if isCurrent:
             drawRect(panelX, y - 10, panelWidth, lineHeight, fill=rgb(50,80,60))
-
         #AI written display var bcs last minute implementation
-
         display = name if len(name) <= 26 else name[:23] + '...'
         color = rgb(120,220,160) if isCurrent else 'white'
         drawLabel(display, panelX + 8, y, align = 'left', size = 11, fill = color)
