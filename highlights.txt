@@ -11,3 +11,4 @@ The Scarlet Letter|0|478|692
 The Importance Of Being Earnest|26|142|298
 The Tale of Two Cities|7|973|1081
 Little Women|0|608|720
+Autobiography of Benjamin Franklin|7|185|354

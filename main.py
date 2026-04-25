@@ -3,7 +3,6 @@ import cv2
 import mediapipe as mp
 import threading
 import time
-from collections import deque
 global_latest_hand_result = None
 
 #this function completely ai written EXEMPT
@@ -17,9 +16,7 @@ def onAppStart(app):
     app.pageIndex = 0
     app.pages = []
     app.totalPages = 0
-
-    app.fingerTurnCooldown = 0.7
-    app.lastFingerTurnTime = 0
+    app.lastSwipeTime = 0
     app.height = 890
     app.width = 680
     app.readingScreen = False
@@ -28,8 +25,6 @@ def onAppStart(app):
     app.books = []
     app.currentRead = None
     app.stepsPerSecond = 30
-    app.lastSwipeTime = 0
-    app.swipeCooldown = 0.5
 
     app.burgerHovered = False
 
@@ -87,6 +82,8 @@ def onAppStart(app):
     app.bookBoxWidth = app.width - 60
     app.bookBoxHeight = app.height - 80
     app.margin = 30
+
+    app.lastFingerX = app.width // 2
 
     
     app.gestureModel = GestureModel()
@@ -150,51 +147,36 @@ def loadAllProgress(app):
         
 
 #AI for using most gesture aspecys and dealing with hand landkark
-def onStep(app):
     global global_latest_hand_result
 
-    if not app.usingCamera:
-        return
+    if app.usingCamera:
+        if global_latest_hand_result is not None:
+            if global_latest_hand_result.hand_landmarks:
+                with app.gestureModel.lock:
+                    app.gestureModel.latestLandmark = global_latest_hand_result.hand_landmarks[0]
+            global_latest_hand_result = None
+        app.gestureModel.processLatestLandmark(app)
+        app.cursorX = app.gestureModel.fingerScreenX
+        app.cursorY = app.gestureModel.fingerScreenY
 
-    freshLandmark = None
-    if global_latest_hand_result is not None:
-        if global_latest_hand_result.multi_hand_landmarks:
-            freshLandmark = global_latest_hand_result.multi_hand_landmarks[0].landmark
-        global_latest_hand_result = None
-
-    app.gestureModel.processLatestLandmark(app, freshLandmark)
-
-    oldX = app.cursorX
-    app.cursorX = app.gestureModel.fingerScreenX
-    app.cursorY = app.gestureModel.fingerScreenY
-
-    if not app.readingScreen:
-        return
-
-    if app.showChapterPanel or app.showNotesPanel or app.showNotePopup:
-        return
-
-    if not hasattr(app, 'lastFingerX'):
+    if not app.readingScreen or not app.usingCamera:
         app.lastFingerX = app.cursorX
-        app.lastSwipeTime = 0
+        return
+    if app.showChapterPanel or app.showNotesPanel or app.showNotePopup:
+        app.lastFingerX = app.cursorX
         return
 
     dx = app.cursorX - app.lastFingerX
     currentTime = time.time()
-
     if currentTime - app.lastSwipeTime > 0.8:
         if dx > 35 and app.pageIndex > 0:
             app.pageIndex -= 1
             savePageChangeOnKeyPress(app)
             app.lastSwipeTime = currentTime
-            print("finger swipe right")
-
         elif dx < -35 and app.pageIndex < app.totalPages - 1:
             app.pageIndex += 1
             savePageChangeOnKeyPress(app)
             app.lastSwipeTime = currentTime
-            print("finger swipe left")
-
     app.lastFingerX = app.cursorX
 
 #some ai for loadbook and makepages for loading pages
@@ -283,11 +265,12 @@ def makeButtons(app):
         if app.usingCamera:
             app.usingCamera = False
             app.gestureController.isRunning = False
-            app.gestureModel.history.clear()
+            app.gestureModel.fingerScreenX = app.width // 2
+            app.gestureModel.fingerScreenY = app.height // 2
+            app.lastFingerX = app.cursorX
         else:
             app.usingCamera = True
             app.gestureModel = GestureModel()
-            app.gestureModel.app = app
             app.gestureController = GestureController(app.gestureModel)
             app.gestureController.start()
 
@@ -324,7 +307,40 @@ def makeButtons(app):
         app.menuButtons.append(b)
         app.buttons.append(b)
 
+def onStep(app):
+    global global_latest_hand_result
 
+    if app.usingCamera:
+        print("camera on, result:", global_latest_hand_result)
+        if global_latest_hand_result is not None:
+            print("landmarks:", global_latest_hand_result.hand_landmarks)
+            if global_latest_hand_result.hand_landmarks:
+                with app.gestureModel.lock:
+                    app.gestureModel.latestLandmark = global_latest_hand_result.hand_landmarks[0]
+            global_latest_hand_result = None
+        app.gestureModel.processLatestLandmark(app)
+        app.cursorX = app.gestureModel.fingerScreenX
+        app.cursorY = app.gestureModel.fingerScreenY
+
+    if not app.readingScreen or not app.usingCamera:
+        app.lastFingerX = app.cursorX
+        return
+    if app.showChapterPanel or app.showNotesPanel or app.showNotePopup:
+        app.lastFingerX = app.cursorX
+        return
+
+    dx = app.cursorX - app.lastFingerX
+    currentTime = time.time()
+    if currentTime - app.lastSwipeTime > 0.8:
+        if dx > 35 and app.pageIndex > 0:
+            app.pageIndex -= 1
+            savePageChangeOnKeyPress(app)
+            app.lastSwipeTime = currentTime
+        elif dx < -35 and app.pageIndex < app.totalPages - 1:
+            app.pageIndex += 1
+            savePageChangeOnKeyPress(app)
+            app.lastSwipeTime = currentTime
+    app.lastFingerX = app.cursorX
 
 def onKeyPress(app, key):
 
@@ -417,9 +433,6 @@ def onMousePress(app, mouseX, mouseY):
     if bx1 <= mouseX <= bx2 and by1 <= mouseY <= by2:
         app.menuOpen = not app.menuOpen
         return 
-    
-    
-
     for button in app.buttons:
         button.handleClick(mouseX, mouseY)
     if app.readingScreen:
@@ -1205,71 +1218,38 @@ class Books:
     def __eq__(self, other):
         return isinstance(other, Books) and ((self.title, self.author) == (other.title, other.author))
 #almost fully integrated gestures classes (2) with AI below but with some self integrated editing EXEMPT:
+
 class GestureModel:
     def __init__(self):
-        self.lastKnownX = 0
-        self.lastKnownY = 0
+        import threading
         self.lock = threading.Lock()
-        
         self.latestLandmark = None
-        
-        self.swipeDirection = None
-        self.swipeDetected = False
         self.fingerScreenX = 200
         self.fingerScreenY = 200
-        
-        self.history = deque()
-        self.lastSwipeTime = 0
 
-        self.timeWindow       = 0.6
-        self.coolDownTime     = 1.2
-        self.maxVerticalDrift = 400
-        self.swipeThreshold   = 45
-
-    
-    #AI Exempt
-    def processLatestLandmark(self, app, freshLandmark):
-        if freshLandmark is None:
+    def processLatestLandmark(self, app):
+        with self.lock:
+            landmark = self.latestLandmark
+        if landmark is None:
             return
-        currentTime = time.time()
-
-        if freshLandmark is not None:
-            tip = freshLandmark[8]
-            self.lastKnownX = tip.x * app.width
-            self.lastKnownY = tip.y * app.height
-            self.fingerScreenX = int(self.fingerScreenX * 0.75 + self.lastKnownX * 0.25)
-            self.fingerScreenY = int(self.fingerScreenY * 0.75 + self.lastKnownY * 0.25)
-            self.history.append((currentTime, self.lastKnownX, self.lastKnownY))
-            while self.history and (currentTime - self.history[0][0] > self.timeWindow):
-                self.history.popleft()
-
-    
-    def detectSwipe(self, currentTime):
-        if len(self.history) < 2:
-            return
-
-        oldTime, oldX, oldY = self.history[0]
-        newTime, newX, newY = self.history[-1]
-
-        dx = newX - oldX
-        dy = newY - oldY
-
-        if abs(dx) > self.swipeThreshold and abs(dy) < self.maxVerticalDrift:
-            if dx > 0:
-                self.swipeDirection = 'right'
-            else:
-                self.swipeDirection = 'left'
-
-            self.swipeDetected = True
-            self.lastSwipeTime = currentTime
-            self.history.clear()
-
+        tip = landmark[8]
+        self.fingerScreenX = int(self.fingerScreenX * 0.85 + (tip.x * 680) * 0.15)
+        self.fingerScreenY = int(self.fingerScreenY * 0.85 + (tip.y * 890) * 0.15)
 
 class GestureController:
     def __init__(self, model):
         self.model = model
-        self.app = None
         self.isRunning = False
+        self.timestamp = 0
+        baseOptions = mp.tasks.BaseOptions
+        self.options = mp.tasks.vision.HandLandmarkerOptions(
+            base_options=baseOptions(model_asset_path='hand_landmarker.task'),
+            running_mode=mp.tasks.vision.RunningMode.LIVE_STREAM,
+            num_hands=1,
+            min_hand_detection_confidence=0.5,
+            min_tracking_confidence=0.6,
+            result_callback=_gestureCallback
+        )
 
     def start(self):
         if not self.isRunning:
@@ -1277,31 +1257,23 @@ class GestureController:
             threading.Thread(target=self.captureLoop, daemon=True).start()
 
     def captureLoop(self):
-        global global_latest_hand_result
-
-        camera = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
-        print("Camera opened:", camera.isOpened())
-
-        hands = mp.solutions.hands.Hands(
-            max_num_hands=1,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-
-        while self.isRunning:
-            success, frame = camera.read()
-            if not success:
-                continue
-
-            frame = cv2.flip(frame, 1)
-            rgbFrame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            result = hands.process(rgbFrame)
-
-            global_latest_hand_result = result
-
-        camera.release()
-        hands.close()
-
+        camera = cv2.VideoCapture(0)
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        try:
+            handLandmarker = mp.tasks.vision.HandLandmarker
+            with handLandmarker.create_from_options(self.options) as landmarker:
+                while self.isRunning and camera.isOpened():
+                    success, frame = camera.read()
+                    if not success: continue
+                    frame = cv2.flip(frame, 1)
+                    rgbFrame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    mpImage = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgbFrame)
+                    self.timestamp += 1
+                    landmarker.detect_async(mpImage, self.timestamp)
+                    time.sleep(0.01)
+        finally:
+            camera.release()
 class curvedRect:
     def __init__(self, app,cX,cY, width, height, color):
         self.cX = cX
